@@ -64,10 +64,17 @@ async function postWithResult({
   const hash = await seen.hashFile(videoPath);
   const claim = await seen.claim(resolvedAccountId, platform, hash, videoPath);
   if (!claim.claimed) {
+    if (claim.reviewRequired) {
+      console.warn(
+        `[${new Date().toISOString()}] [${platform}] ${path.basename(videoPath)} remains in posted-uncertain; human review required.`
+      );
+    }
     return {
       ok: true,
       skipped: true,
-      reason: `Video hash already seen for ${platform}: ${hash}.`,
+      reason: claim.reviewRequired
+        ? `Video hash requires human review for ${platform}: ${hash}.`
+        : `Video hash already seen for ${platform}: ${hash}.`,
       seen: claim.existing,
     };
   }

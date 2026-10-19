@@ -410,3 +410,9 @@ Hallazgo: docs/assets/dashboard-overview.png en commit base 4771789 (heredado de
 Escáner de secretos: 1 hit. Naturaleza: contenido heredado, exposición preexistente y pública.
 Decisión: NO reescritura de historial (costo > beneficio). Push a repo privado autorizado.
 Disparador de reevaluación: si este fork se hiciera público algún día → clean-room(rama orphan o squash a 1 commit nuevo), NUNCA force-push sobre la cadena auditada.
+
+## Cierre R3 — Fix A
+
+- **Ítem 11 — CERRADO:** `src/tiktok-uploader.js:1109-1124` y `src/instagram-uploader.js:338-347` solo aceptan permalink o texto dentro de contenedor de confirmación; el texto genérico del `body` produce `status: "uncertain"`.
+- **Ítem 9 — CERRADO para reintento seguro:** `src/post-finalizer.js:65-80` y `src/idempotency.js:130-136` dejan un hash `uncertain` en revisión humana, emiten log y no vuelven a invocar el uploader.
+- **Tests:** `src/__tests__/confirmation.test.js` cubre body genérico, confirmación específica/permalink y archivo `posted-uncertain` con `.error.json` y notificación.

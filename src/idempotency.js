@@ -129,7 +129,11 @@ class SeenRegistry {
       data.accounts[accountId][platform] ||= {};
       const existing = data.accounts[accountId][platform][hash];
       if (existing) {
-        return { claimed: false, existing };
+        return {
+          claimed: false,
+          existing,
+          reviewRequired: existing.status === "uncertain",
+        };
       }
       data.accounts[accountId][platform][hash] = {
         status: "in-progress",
