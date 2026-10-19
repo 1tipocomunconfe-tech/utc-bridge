@@ -55,3 +55,7 @@ queue/**/*.txt
 # Keep docs visible
 !README.md
 !SETUP.md
+docs/*.png
+docs/pilot-report-*.log
+queue/
+*.tmp
