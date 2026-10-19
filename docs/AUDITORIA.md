@@ -404,3 +404,9 @@ Críticos que deben cerrarse antes de un piloto:
 4. Resolver la vulnerabilidad crítica de `proxy-addr` y volver a ejecutar `npm audit`.
 
 Condiciones adicionales antes de publicar con cuentas reales: corregir el fallback de metadata inválida, implementar recuperación de locks/estados `in-progress`, serializar las cuotas, endurecer la confirmación post-publicación de YouTube y configurar/revisar el remote `upstream`.
+
+# Riesgo residual aceptado (2026-10-20)
+Hallazgo: docs/assets/dashboard-overview.png en commit base 4771789 (heredado del upstream público Katzca/AutoSocial).
+Escáner de secretos: 1 hit. Naturaleza: contenido heredado, exposición preexistente y pública.
+Decisión: NO reescritura de historial (costo > beneficio). Push a repo privado autorizado.
+Disparador de reevaluación: si este fork se hiciera público algún día → clean-room(rama orphan o squash a 1 commit nuevo), NUNCA force-push sobre la cadena auditada.
