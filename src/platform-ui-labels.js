@@ -25,7 +25,8 @@ const LABELS = {
   youtubePublic: ["public", "\u00f6ffentlich"],
   youtubePublish: ["publish", "ver\u00f6ffentlichen"],
   youtubeSave: ["save", "speichern"],
-  youtubePublished: ["published", "processing", "ver\u00f6ffentlicht", "verarbeitet"],
+  youtubePublished: ["published", "ver\u00f6ffentlicht"],
+  youtubeProcessing: ["processing", "verarbeitet"],
 
   tiktokSearchSounds: ["Search sounds", "Sounds suchen"],
   tiktokEdit: ["edit", "bearbeiten"],
@@ -42,7 +43,6 @@ const LABELS = {
   tiktokPublished: [
     "published",
     "posted",
-    "success",
     "scheduled",
     "ver\u00f6ffentlicht",
     "veroeffentlicht",
