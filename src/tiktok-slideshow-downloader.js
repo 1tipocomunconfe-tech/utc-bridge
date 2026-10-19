@@ -1,5 +1,6 @@
 const fs = require("fs/promises");
 const path = require("path");
+const { fetchWithRedirectPolicy, validateAllowedUrl } = require("./net-policy");
 
 const INFO_JSON_SUFFIX = ".info.json";
 
@@ -261,7 +262,9 @@ function isLikelySlideshowInfo(info) {
   }
 
   const webpageUrl = String(info.webpage_url || info.original_url || "");
-  if (!/tiktok\.com/i.test(webpageUrl)) {
+  try {
+    validateAllowedUrl(webpageUrl);
+  } catch {
     return false;
   }
 
@@ -315,13 +318,8 @@ function getHeadersFromInfo(info) {
 }
 
 async function fetchText(url, headers) {
-  if (typeof fetch !== "function") {
-    throw new Error("Global fetch is unavailable. Node 18+ is required.");
-  }
-
-  const response = await fetch(url, {
+  const response = await fetchWithRedirectPolicy(url, {
     headers,
-    redirect: "follow",
   });
 
   if (!response.ok) {
@@ -364,12 +362,11 @@ function inferImageExtension(url, contentType) {
 }
 
 async function downloadImage(url, destinationStem, headers) {
-  const response = await fetch(url, {
+  const response = await fetchWithRedirectPolicy(url, {
     headers: {
       ...headers,
       Accept: "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
     },
-    redirect: "follow",
   });
 
   if (!response.ok) {
@@ -536,5 +533,8 @@ async function enrichRecentSlideshowDownloads(downloadsDir, sinceMs, log) {
 }
 
 module.exports = {
+  downloadImage,
   enrichRecentSlideshowDownloads,
+  fetchText,
+  isLikelySlideshowInfo,
 };

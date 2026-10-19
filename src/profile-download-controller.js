@@ -11,6 +11,7 @@ const path = require("path");
 const { execFile } = require("child_process");
 const { config } = require("./config");
 const { enrichRecentSlideshowDownloads } = require("./tiktok-slideshow-downloader");
+const { validateAllowedUrl, validateUrlRedirects } = require("./net-policy");
 
 function nowIso() {
     return new Date().toISOString();
@@ -21,13 +22,14 @@ function ensureDir(dir) {
 }
 
 class ProfileDownloadController {
-    constructor() {
+    constructor(options = {}) {
         this.running = false;
         this.logs = [];
 
         this.baseDir = path.resolve(config.projectRoot, "autodownload");
         this.ytDlp = path.join(this.baseDir, "yt-dlp.exe");
         this.downloadsDir = path.join(this.baseDir, "profile_downloads");
+        this.fetchImpl = options.fetchImpl || globalThis.fetch;
 
         ensureDir(this.downloadsDir);
     }
@@ -46,9 +48,9 @@ class ProfileDownloadController {
 
     _channelUrl(channel) {
         let ch = String(channel).trim();
-        if (ch.startsWith("http")) return ch;
+        if (ch.startsWith("http")) return validateAllowedUrl(ch).toString();
         if (!ch.startsWith("@")) ch = "@" + ch;
-        return `https://www.tiktok.com/${ch}`;
+        return validateAllowedUrl(`https://www.tiktok.com/${ch}`).toString();
     }
 
     async start({ channel, minViews, maxVideos, scanOnly }) {
@@ -83,7 +85,8 @@ class ProfileDownloadController {
         return { ok: true };
     }
 
-    _runYtDlp(url, minViews, maxVideos, scanOnly) {
+    async _runYtDlp(url, minViews, maxVideos, scanOnly) {
+        await validateUrlRedirects(url, { fetchImpl: this.fetchImpl });
         return new Promise((resolve) => {
             const startedAtMs = Date.now();
             const dlArgs = [

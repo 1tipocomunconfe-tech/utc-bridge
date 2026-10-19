@@ -12,6 +12,7 @@ const path = require("path");
 const { execFile } = require("child_process");
 const { config } = require("./config");
 const { getActiveAccount, getAccountQueueDirs, ensureAccountDirs } = require("./account-manager");
+const { validateAllowedUrl, validateUrlRedirects } = require("./net-policy");
 
 function nowIso() {
     return new Date().toISOString();
@@ -22,7 +23,7 @@ function ensureDir(dir) {
 }
 
 class AutoDownloadController {
-    constructor() {
+    constructor(options = {}) {
         this.channel = config.autoDownload.channel || "";
         this.interval = config.autoDownload.interval || 10;
         this.maxVideos = config.autoDownload.maxVideos || 5;
@@ -35,6 +36,7 @@ class AutoDownloadController {
         this.totalDownloaded = 0;
         this.logs = [];
         this._timer = null;
+        this.fetchImpl = options.fetchImpl || globalThis.fetch;
 
         this.baseDir = path.resolve(config.projectRoot, "autodownload");
         this.ytDlp = path.join(this.baseDir, "yt-dlp.exe");
@@ -148,6 +150,8 @@ class AutoDownloadController {
             this.accountId = activeAccount.id;
         }
 
+        const channelUrl = this._channelUrl();
+
         await ensureAccountDirs(this.accountId);
         await this._saveState();
 
@@ -156,7 +160,7 @@ class AutoDownloadController {
 
         const platformList = this.platforms.map((p) => p.toUpperCase()).join(", ");
         this.log(
-            `Watcher started - channel: ${this._channelUrl()}, every ${this.interval}m, posting to: ${platformList}, account: ${this.accountId}`
+            `Watcher started - channel: ${channelUrl}, every ${this.interval}m, posting to: ${platformList}, account: ${this.accountId}`
         );
 
         this._poll();
@@ -185,7 +189,9 @@ class AutoDownloadController {
 
     _channelUrl() {
         const ch = this.channel;
-        return ch.startsWith("http") ? ch : `https://www.tiktok.com/${ch}`;
+        return ch.startsWith("http")
+            ? validateAllowedUrl(ch).toString()
+            : validateAllowedUrl(`https://www.tiktok.com/${ch}`).toString();
     }
 
     async _poll() {
@@ -217,7 +223,9 @@ class AutoDownloadController {
         }
     }
 
-    _runYtDlp() {
+    async _runYtDlp() {
+        const channelUrl = this._channelUrl();
+        await validateUrlRedirects(channelUrl, { fetchImpl: this.fetchImpl });
         return new Promise((resolve) => {
             const dlArgs = [
                 "--no-warnings",
@@ -235,7 +243,7 @@ class AutoDownloadController {
                 dlArgs.push("--match-filter", `view_count >= ${this.minViews}`);
             }
 
-            dlArgs.push(this._channelUrl());
+            dlArgs.push(channelUrl);
 
             this.log(`Checking ${this._channelUrl()} for new videos...`);
 
