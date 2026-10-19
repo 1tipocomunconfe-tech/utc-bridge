@@ -58,6 +58,27 @@ const config = {
     projectRoot,
     process.env.YOUTUBE_PROFILE_DIR || ".profile-youtube"
   ),
+  orchestratorEnabled: getBoolean(process.env.ORCHESTRATOR_ENABLED, true),
+  killSwitch: getBoolean(process.env.KILL_SWITCH, false),
+  orchestratorInboxDir: path.resolve(
+    projectRoot,
+    process.env.INBOX_DIR || "queue/inbox"
+  ),
+  orchestratorDryRun: getBoolean(process.env.DRY_RUN, false),
+  staggerTikTokMin: Number(process.env.STAGGER_TIKTOK_MIN || 0),
+  staggerInstagramMin: Number(process.env.STAGGER_INSTAGRAM_MIN || 45),
+  staggerYouTubeMin: Number(process.env.STAGGER_YOUTUBE_MIN || 90),
+  dailyCapTikTok: Number(process.env.DAILY_CAP_TIKTOK || 2),
+  dailyCapInstagram: Number(process.env.DAILY_CAP_INSTAGRAM || 2),
+  dailyCapYouTube: Number(process.env.DAILY_CAP_YOUTUBE || 2),
+  jitterMaxMs: Number(process.env.JITTER_MAX_MS || 120000),
+  publishWindowStart: process.env.PUBLISH_WINDOW_START || "08:00",
+  publishWindowEnd: process.env.PUBLISH_WINDOW_END || "22:00",
+  schedulerStateDir: path.resolve(
+    projectRoot,
+    process.env.SCHEDULER_STATE_DIR || ".scheduler-state"
+  ),
+  staleLockMs: Number(process.env.STALE_LOCK_MS || 30 * 60 * 1000),
   cronExpression: process.env.CRON_EXPRESSION || "0 */2 * * *",
   instagramCronExpression: process.env.INSTAGRAM_CRON_EXPRESSION || "0 */2 * * *",
   youtubeCronExpression: process.env.YOUTUBE_CRON_EXPRESSION || "0 */2 * * *",
@@ -71,6 +92,11 @@ const config = {
   randomQueueOrder: getBoolean(process.env.RANDOM_QUEUE_ORDER, false),
   defaultSoundQuery: process.env.DEFAULT_SOUND_QUERY || "",
   defaultCaption: process.env.DEFAULT_CAPTION || "",
+  notifyTelegramBotToken: process.env.NOTIFY_TELEGRAM_BOT_TOKEN || "",
+  notifyTelegramChatId: process.env.NOTIFY_TELEGRAM_CHAT_ID || "",
+  notifyDiscordWebhookUrl: process.env.NOTIFY_DISCORD_WEBHOOK_URL || "",
+  notifyLevel: process.env.NOTIFY_LEVEL || "errors",
+  notifyDailySummary: getBoolean(process.env.NOTIFY_DAILY_SUMMARY, false),
   uploadPageUrl:
     process.env.TIKTOK_UPLOAD_URL || "https://www.tiktok.com/tiktokstudio/upload",
   instagramUploadPageUrl:
@@ -79,7 +105,9 @@ const config = {
     process.env.YOUTUBE_UPLOAD_URL || "https://studio.youtube.com",
   dashboardHost: process.env.DASHBOARD_HOST || "127.0.0.1",
   dashboardPort: Number(process.env.DASHBOARD_PORT || 3000),
+  dashboardToken: process.env.DASHBOARD_TOKEN || "",
   dashboardAllowRemote: getBoolean(process.env.DASHBOARD_ALLOW_REMOTE, false),
+  confirmRemoteRisk: getBoolean(process.env.CONFIRM_REMOTE_RISK, false),
   uniquifyInputDir: path.resolve(
     projectRoot,
     process.env.UNIQUIFY_INPUT_DIR || "queue/uniquify-input"
