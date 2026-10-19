@@ -20,11 +20,97 @@ function clone(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
+function parseProxy(proxyValue) {
+  const value = String(proxyValue || "").trim();
+  if (!value) {
+    return null;
+  }
+
+  let parsed;
+  try {
+    parsed = new URL(value);
+  } catch (error) {
+    throw new Error("Proxy must be a valid URL such as http://user:pass@host:port.");
+  }
+
+  if (!["http:", "https:", "socks5:"].includes(parsed.protocol) || !parsed.hostname) {
+    throw new Error("Proxy protocol must be http, https or socks5 and include a hostname.");
+  }
+
+  const proxy = {
+    server: `${parsed.protocol}//${parsed.hostname}${parsed.port ? `:${parsed.port}` : ""}`,
+  };
+  if (parsed.username) {
+    proxy.username = decodeURIComponent(parsed.username);
+  }
+  if (parsed.password) {
+    proxy.password = decodeURIComponent(parsed.password);
+  }
+  return proxy;
+}
+
+function inferCountryFromTimezone(timezone) {
+  const normalized = String(timezone || "").toLowerCase();
+  const matches = [
+    [/america\/(new_york|detroit|chicago|denver|los_angeles|phoenix)/, "US"],
+    [/america\/(toronto|vancouver|winnipeg|edmonton)/, "CA"],
+    [/america\/(mexico_city|tijuana|monterrey)/, "MX"],
+    [/america\/sao_paulo/, "BR"],
+    [/america\/argentina/, "AR"],
+    [/europe\/madrid|atlantic\/canary/, "ES"],
+    [/europe\/lisbon|atlantic\/azores/, "PT"],
+    [/europe\/london/, "GB"],
+    [/europe\/berlin/, "DE"],
+    [/europe\/paris/, "FR"],
+    [/europe\/rome/, "IT"],
+    [/asia\/tokyo/, "JP"],
+    [/australia\//, "AU"],
+  ];
+  return matches.find(([pattern]) => pattern.test(normalized))?.[1] || null;
+}
+
+function inferCountryFromLocale(locale) {
+  const match = /[-_]([a-z]{2})$/i.exec(String(locale || ""));
+  return match ? match[1].toUpperCase() : null;
+}
+
+function inferCountryFromProxy(proxyValue) {
+  const value = String(proxyValue || "").trim();
+  if (!value) {
+    return null;
+  }
+  const hostname = new URL(value).hostname.toLowerCase();
+  const labels = hostname.split(".");
+  const countryCodes = new Set([
+    "ar", "au", "br", "ca", "cl", "co", "de", "es", "fr", "gb", "it", "jp", "mx", "pe", "pt", "us",
+  ]);
+  const countryLabel = [...labels].reverse().find((label) => countryCodes.has(label));
+  return countryLabel ? countryLabel.toUpperCase() : null;
+}
+
+function getProxyGeographyWarning(proxyValue, options = {}) {
+  if (!proxyValue) {
+    return null;
+  }
+  const proxyCountry = inferCountryFromProxy(proxyValue);
+  const locale = options.locale || config.browserLocale;
+  const timezone = options.timezone || config.timezone;
+  const expectedCountries = [inferCountryFromLocale(locale), inferCountryFromTimezone(timezone)].filter(Boolean);
+  if (!proxyCountry || expectedCountries.length === 0 || expectedCountries.every((country) => country === proxyCountry)) {
+    return null;
+  }
+  return `Proxy country ${proxyCountry} differs from browser geography (expected ${expectedCountries.join("/")}, TZ=${timezone}, locale=${locale}).`;
+}
+
 function normalizeState(raw) {
   const accounts = Array.isArray(raw?.accounts)
     ? raw.accounts
       .filter((item) => item && typeof item.id === "string" && typeof item.name === "string")
-      .map((item) => ({ id: item.id, name: item.name }))
+      .map((item) => ({
+        id: item.id,
+        name: item.name,
+        ...(typeof item.proxy === "string" && item.proxy.trim() ? { proxy: item.proxy.trim() } : {}),
+      }))
     : [];
   if (!accounts.length) {
     accounts.push({ ...DEFAULT_ACCOUNT });
@@ -114,7 +200,7 @@ async function ensureAccountDirs(accountId) {
 
 // Account CRUD
 
-async function addAccount(name) {
+async function addAccount(name, options = {}) {
   await ensureLoaded();
   const cleanName = sanitizeName(name);
   if (!cleanName) {
@@ -123,7 +209,11 @@ async function addAccount(name) {
 
   const existingIds = new Set(state.accounts.map((item) => item.id));
   const id = ensureUniqueId(makeId(cleanName), existingIds);
-  const account = { id, name: cleanName };
+  const proxy = options.proxy ? String(options.proxy).trim() : "";
+  if (proxy) {
+    parseProxy(proxy);
+  }
+  const account = { id, name: cleanName, ...(proxy ? { proxy } : {}) };
   state.accounts.push(account);
   state.activeAccountId = account.id;
   await saveState();
@@ -155,6 +245,21 @@ async function getActiveAccount() {
 async function getAllAccounts() {
   await ensureLoaded();
   return clone(state.accounts);
+}
+
+async function getAccountProxy(accountId) {
+  await ensureLoaded();
+  const account = state.accounts.find((item) => item.id === accountId);
+  if (!account?.proxy) {
+    return undefined;
+  }
+
+  const proxy = parseProxy(account.proxy);
+  const warning = getProxyGeographyWarning(account.proxy);
+  if (warning) {
+    console.warn(`[${new Date().toISOString()}] [account:${account.id}] WARNING ${warning}`);
+  }
+  return proxy;
 }
 
 async function getPlatformProfileDir(platform, accountId) {
@@ -201,6 +306,10 @@ module.exports = {
   getAccountQueueDirs,
   ensureAccountDirs,
   getPlatformProfileDir,
+  getAccountProxy,
+  getProxyGeographyWarning,
+  inferCountryFromProxy,
+  parseProxy,
   hasSavedPlatformSession,
   PLATFORMS,
 };
