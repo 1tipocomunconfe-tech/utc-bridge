@@ -53,6 +53,40 @@ class SeenRegistry {
     return crypto.createHash("sha256").update(contents).digest("hex");
   }
 
+  async getSnapshot() {
+    return this._withStateLock(() => this._read());
+  }
+
+  async markUncertain(accountId, platform, hash, videoPath, reason) {
+    const entry = await this._withStateLock(async () => {
+      const data = await this._read();
+      data.accounts ||= {};
+      data.accounts[accountId] ||= {};
+      data.accounts[accountId][platform] ||= {};
+      const current = data.accounts[accountId][platform][hash] || {};
+      const next = {
+        ...current,
+        status: "uncertain",
+        videoPath,
+        uncertaintyReason: reason,
+        uncertainAt: new Date().toISOString(),
+      };
+      data.accounts[accountId][platform][hash] = next;
+      await this._write(data);
+      return next;
+    });
+    dispatchUncertainNotification(this.notifier, {
+      accountId,
+      platform,
+      hash,
+      videoPath,
+      error: reason,
+      screenshotPath: null,
+      timestamp: new Date().toISOString(),
+    });
+    return entry;
+  }
+
   async _markStaleLockUncertain(existing) {
     const data = await this._read();
     const { accountId, platform, hash } = existing || {};

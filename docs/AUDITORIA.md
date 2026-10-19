@@ -416,3 +416,9 @@ Disparador de reevaluación: si este fork se hiciera público algún día → cl
 - **Ítem 11 — CERRADO:** `src/tiktok-uploader.js:1109-1124` y `src/instagram-uploader.js:338-347` solo aceptan permalink o texto dentro de contenedor de confirmación; el texto genérico del `body` produce `status: "uncertain"`.
 - **Ítem 9 — CERRADO para reintento seguro:** `src/post-finalizer.js:65-80` y `src/idempotency.js:130-136` dejan un hash `uncertain` en revisión humana, emiten log y no vuelven a invocar el uploader.
 - **Tests:** `src/__tests__/confirmation.test.js` cubre body genérico, confirmación específica/permalink y archivo `posted-uncertain` con `.error.json` y notificación.
+
+## Cierre R3 — Fix B
+
+- **Ítem 9 — CERRADO:** `src/startup-reconcile.js:91-151` ejecuta `reconcileInProgress()` y reconcilia `pending/` y `posted-uncertain/` contra `.scheduler-state/seen.json`; `src/scheduler.js:285-310`, `src/orchestrator.js:341-354` y `src/dashboard-server.js:211-215` lo ejecutan antes de registrar/aceptar trabajos.
+- **Evidencia:** cada movimiento registra timestamp, cuenta, plataforma, archivo y transición; estados `confirmed` van a `posted/`, estados inciertos permanecen en `posted-uncertain/` y los `in-progress` se convierten en `uncertain` antes de moverlos.
+- **Test:** `src/__tests__/startup-reconciliation.test.js` verifica el barrido antes del primer tick y tres movimientos de archivos inconsistentes.

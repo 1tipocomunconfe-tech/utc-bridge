@@ -6,7 +6,7 @@ const { config } = require("./config");
 const { getKillSwitchReason, isKillSwitchEnabled } = require("./kill-switch");
 const { getActiveAccount, getAccountQueueDirs } = require("./account-manager");
 const { getMetadataPath, loadVideoMetadata } = require("./meta-loader");
-const { reconcileSeenState } = require("./post-finalizer");
+const { reconcileStartupState } = require("./startup-reconcile");
 
 const VIDEO_EXTENSIONS = new Set([".mp4", ".mov", ".webm", ".avi", ".mkv"]);
 const PLATFORM_OFFSETS = {
@@ -339,7 +339,7 @@ function watchInbox(options = {}) {
 }
 
 async function runCli(args = process.argv.slice(2)) {
-  await reconcileSeenState();
+  await reconcileStartupState();
   const once = args.includes("--once");
   if (once) {
     const result = await processInboxOnce();

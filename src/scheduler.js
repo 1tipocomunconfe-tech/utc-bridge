@@ -5,7 +5,7 @@ const { config } = require("./config");
 const { getNextQueuedItem } = require("./queue");
 const { LimitsStore } = require("./limits");
 const { postNextFromQueue } = require("./post-service");
-const { reconcileSeenState } = require("./post-finalizer");
+const { reconcileStartupState } = require("./startup-reconcile");
 const { getKillSwitchReason, isKillSwitchEnabled } = require("./kill-switch");
 
 function now() {
@@ -283,7 +283,7 @@ async function runScheduledPost(options = {}) {
 }
 
 async function startDaemon(options = {}) {
-  await (options.reconcile || reconcileSeenState)(options.notifier);
+  await (options.reconcile || reconcileStartupState)(options);
   if (!cron.validate(config.cronExpression)) {
     throw new Error(`Invalid CRON_EXPRESSION: ${config.cronExpression}`);
   }

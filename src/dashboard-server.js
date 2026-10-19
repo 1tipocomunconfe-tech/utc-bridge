@@ -18,7 +18,7 @@ const {
   collectSessionsHealth,
   requeueFailedVideo,
 } = require("./operations-state");
-const { reconcileSeenState } = require("./post-finalizer");
+const { reconcileStartupState } = require("./startup-reconcile");
 const {
   startDashboardLoginSession: startTikTokLoginSession,
   getLoginSessionStatus: getTikTokLoginSessionStatus,
@@ -209,7 +209,7 @@ function assertPlatform(platform) {
 }
 
 async function createServer() {
-  await reconcileSeenState();
+  await reconcileStartupState();
 
   // Run migration from old flat queue layout to per-profile structure
   await migrateQueueIfNeeded();

@@ -59,3 +59,6 @@ docs/*.png
 docs/pilot-report-*.log
 queue/
 *.tmp
+
+# macOS
+.DS_Store
