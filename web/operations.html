@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AutoSocial+ Operations</title>
+  <style>
+    :root { color-scheme: dark; --bg:#101318; --card:#191e27; --line:#303846; --text:#eef2f7; --muted:#9aa6b6; --good:#39d98a; --bad:#ff6b6b; --warn:#f5c451; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--bg); color:var(--text); font:14px/1.45 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+    main { max-width:1400px; margin:0 auto; padding:28px; }
+    header { display:flex; justify-content:space-between; gap:16px; align-items:flex-start; flex-wrap:wrap; margin-bottom:22px; }
+    h1,h2 { margin:0 0 6px; } h1 { font-size:28px; } h2 { font-size:18px; }
+    .muted { color:var(--muted); }
+    .toolbar,.card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px; }
+    .toolbar { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+    input,button { border:1px solid var(--line); border-radius:7px; background:#11161d; color:var(--text); padding:9px 11px; }
+    input { min-width:250px; } button { cursor:pointer; } button:hover { border-color:#76869d; } button.primary { background:#2359a8; border-color:#3474d2; } button.danger { background:#652d38; border-color:#9d4657; } button.good { background:#1d5a43; border-color:#2b926a; }
+    .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:14px; margin:14px 0; }
+    .actions { display:flex; gap:8px; flex-wrap:wrap; margin-top:12px; }
+    .status { min-height:20px; margin:10px 0; color:var(--muted); } .status.error { color:var(--bad); } .status.good { color:var(--good); }
+    table { width:100%; border-collapse:collapse; } th,td { padding:10px 8px; border-bottom:1px solid var(--line); text-align:left; vertical-align:top; } th { color:var(--muted); font-weight:500; }
+    .pill { display:inline-block; border:1px solid var(--line); border-radius:999px; padding:2px 8px; margin:2px 4px 2px 0; font-size:12px; } .good-text { color:var(--good); } .bad-text { color:var(--bad); } .warn-text { color:var(--warn); }
+    .small { font-size:12px; } .nowrap { white-space:nowrap; } .empty { color:var(--muted); padding:18px 0; }
+    @media (max-width:800px) { main { padding:16px; } table { display:block; overflow-x:auto; white-space:nowrap; } }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <h1>Operations</h1>
+        <div class="muted">Queues, scheduler controls and session heuristics · local dashboard</div>
+      </div>
+      <div class="toolbar">
+        <label for="token">DASHBOARD_TOKEN</label>
+        <input id="token" type="password" autocomplete="off" placeholder="Enter local dashboard token">
+        <button id="saveToken">Save token</button>
+        <button id="refresh">Refresh</button>
+      </div>
+    </header>
+
+    <div id="message" class="status"></div>
+    <section class="card">
+      <h2>Scheduler controls</h2>
+      <div class="actions">
+        <button id="pauseAll" class="danger">Pause all</button>
+        <button id="resumeAll" class="good">Resume all</button>
+        <button id="tickAll" class="primary">Force tick all</button>
+      </div>
+    </section>
+
+    <section class="card" style="margin-top:14px;">
+      <h2>Queues and limits</h2>
+      <div id="queueTable" class="empty">Loading operational status…</div>
+    </section>
+
+    <section class="card" style="margin-top:14px;">
+      <h2>Session health</h2>
+      <div id="healthTable" class="empty">Loading session health…</div>
+    </section>
+  </main>
+  <script src="operations.js"></script>
+</body>
+</html>

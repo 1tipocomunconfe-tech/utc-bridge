@@ -4,6 +4,9 @@ const path = require("path");
 const cron = require("node-cron");
 const { config } = require("./config");
 const { postNextFromQueue } = require("./youtube-post-service");
+const { getNextQueuedItem } = require("./youtube-queue");
+const { createSchedulerPolicy } = require("./scheduler");
+const { getKillSwitchReason, isKillSwitchEnabled } = require("./kill-switch");
 
 function nowIso() {
   return new Date().toISOString();
@@ -60,6 +63,12 @@ class YouTubeDaemonController {
     this._watchDebounce = null;
     this._scheduledTimers = new Set();
     this.statePath = options.statePath || path.resolve(config.projectRoot, "youtube-scheduler-state.json");
+    this.schedulerPolicy = createSchedulerPolicy({
+      platform: "youtube",
+      accountId: this.accountId,
+      queueDir: this.queueDir,
+      getNextQueuedItem,
+    });
     this._loadState();
   }
 
@@ -150,6 +159,13 @@ class YouTubeDaemonController {
   }
 
   async runOnce(source = "manual") {
+    if (isKillSwitchEnabled()) {
+      this.stop();
+      const result = { ok: true, skipped: true, paused: true, reason: getKillSwitchReason() };
+      this.lastResult = result;
+      this.log(getKillSwitchReason());
+      return result;
+    }
     if (this.isPosting) {
       return { ok: false, skipped: true, reason: "A YouTube post is already in progress." };
     }
@@ -158,7 +174,16 @@ class YouTubeDaemonController {
     this.lastRunAt = nowIso();
     this.log(`Run triggered by ${source}.`);
 
+    let prepared = null;
+    let finalized = false;
     try {
+      prepared = await this.schedulerPolicy.prepare();
+      if (prepared.skipped) {
+        this.lastResult = prepared;
+        this.log(prepared.reason);
+        return prepared;
+      }
+
       const result = await postNextFromQueue({
         source,
         queueDir: this.queueDir,
@@ -166,6 +191,8 @@ class YouTubeDaemonController {
         failedDir: this.failedDir,
         accountId: this.accountId,
       });
+      await this.schedulerPolicy.finish(prepared, result);
+      finalized = true;
       this.lastResult = result;
 
       if (result.skipped) {
@@ -180,6 +207,9 @@ class YouTubeDaemonController {
       }
       return result;
     } catch (error) {
+      if (prepared && !finalized) {
+        await this.schedulerPolicy.finish(prepared, { ok: false }).catch(() => { });
+      }
       const failedResult = { ok: false, error: error.message || "Unexpected YouTube scheduler error" };
       this.lastResult = failedResult;
       this.log(`Post failed: ${failedResult.error}`, "error");
@@ -190,6 +220,11 @@ class YouTubeDaemonController {
   }
 
   _scheduleWithJitter(source) {
+    if (isKillSwitchEnabled()) {
+      this.stop();
+      this.log(getKillSwitchReason());
+      return;
+    }
     const MAX_JITTER_MS = 10 * 60 * 1000;
     const jitterMs = Math.floor(Math.random() * MAX_JITTER_MS);
     const jitterMin = Math.round(jitterMs / 1000 / 60 * 10) / 10;
@@ -213,6 +248,10 @@ class YouTubeDaemonController {
   }
 
   start() {
+    if (isKillSwitchEnabled()) {
+      this.log(getKillSwitchReason());
+      return { ok: true, paused: true, reason: getKillSwitchReason() };
+    }
     if (this.task) {
       return { ok: true, alreadyRunning: true };
     }
@@ -272,6 +311,10 @@ class YouTubeDaemonController {
   }
 
   _startWatching() {
+    if (isKillSwitchEnabled()) {
+      this.log(getKillSwitchReason());
+      return;
+    }
     if (this._queueWatcher) return;
     const VIDEO_EXTS = new Set([".mp4", ".mov", ".webm", ".avi", ".mkv"]);
     try {

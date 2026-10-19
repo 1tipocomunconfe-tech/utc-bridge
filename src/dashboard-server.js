@@ -1,5 +1,6 @@
 const path = require("path");
 const os = require("os");
+const crypto = require("crypto");
 const fs = require("fs/promises");
 const { spawn } = require("child_process");
 const express = require("express");
@@ -12,6 +13,11 @@ const { getDaemons, getAllStatus } = require("./daemon-registry");
 const { migrateQueueIfNeeded } = require("./migrate-queue");
 const { createDashboardRequestGuard } = require("./request-guard");
 const { buildSetupHealth, getAllowedSetupFolderPath } = require("./setup-health");
+const {
+  collectOperationsStatus,
+  collectSessionsHealth,
+  requeueFailedVideo,
+} = require("./operations-state");
 const {
   startDashboardLoginSession: startTikTokLoginSession,
   getLoginSessionStatus: getTikTokLoginSessionStatus,
@@ -101,6 +107,12 @@ function isLoopbackHost(host) {
 }
 
 function ensureDashboardBindAllowed() {
+  if (config.dashboardAllowRemote && !config.confirmRemoteRisk) {
+    throw new Error(
+      "DASHBOARD_ALLOW_REMOTE=true requires CONFIRM_REMOTE_RISK=true. " +
+      "Keep the dashboard on 127.0.0.1 whenever possible."
+    );
+  }
   if (config.dashboardAllowRemote || isLoopbackHost(config.dashboardHost)) {
     return;
   }
@@ -109,6 +121,90 @@ function ensureDashboardBindAllowed() {
     `Refusing to bind dashboard to "${config.dashboardHost}". ` +
     "Use DASHBOARD_HOST=127.0.0.1 or set DASHBOARD_ALLOW_REMOTE=true if you understand the risk."
   );
+}
+
+function redactProxy(proxyValue) {
+  if (!proxyValue) {
+    return undefined;
+  }
+  let parsed;
+  try {
+    parsed = new URL(String(proxyValue));
+  } catch {
+    return "[invalid-proxy-redacted]";
+  }
+  const host = `${parsed.hostname}${parsed.port ? `:${parsed.port}` : ""}`;
+  return parsed.username || parsed.password
+    ? `${parsed.protocol}//user:***@${host}`
+    : `${parsed.protocol}//${host}`;
+}
+
+function redactAccountState(rawState) {
+  const state = rawState && typeof rawState === "object" ? rawState : {};
+  const redactAccount = (account) => {
+    if (!account || typeof account !== "object") {
+      return account;
+    }
+    const result = { ...account };
+    if (Object.prototype.hasOwnProperty.call(result, "proxy")) {
+      result.proxy = redactProxy(result.proxy);
+    }
+    return result;
+  };
+  return {
+    ...state,
+    accounts: Array.isArray(state.accounts) ? state.accounts.map(redactAccount) : state.accounts,
+    activeAccount: redactAccount(state.activeAccount),
+  };
+}
+
+function serializeAccountsResponse(state, activeAccount) {
+  return redactAccountState({ ...state, activeAccount });
+}
+
+function getDashboardToken(req) {
+  const header = req.get("x-dashboard-token") || "";
+  if (header) {
+    return header;
+  }
+  const authorization = req.get("authorization") || "";
+  return authorization.toLowerCase().startsWith("bearer ")
+    ? authorization.slice(7).trim()
+    : "";
+}
+
+function isDashboardTokenValid(received, expected) {
+  const actualBuffer = Buffer.from(String(received || ""));
+  const expectedBuffer = Buffer.from(String(expected || ""));
+  return actualBuffer.length === expectedBuffer.length &&
+    actualBuffer.length > 0 &&
+    crypto.timingSafeEqual(actualBuffer, expectedBuffer);
+}
+
+function requireDashboardAccess(req, res, next) {
+  if (!String(req.path || "").startsWith("/api/")) {
+    next();
+    return;
+  }
+  if (!config.dashboardToken) {
+    res.status(503).json({ ok: false, error: "DASHBOARD_TOKEN is required for dashboard actions." });
+    return;
+  }
+  if (!isDashboardTokenValid(getDashboardToken(req), config.dashboardToken)) {
+    res.status(401).json({ ok: false, error: "Invalid dashboard token." });
+    return;
+  }
+  if (!["GET", "HEAD", "OPTIONS"].includes(String(req.method || "").toUpperCase()) && req.body?.confirm !== true) {
+    res.status(400).json({ ok: false, error: "Confirmation required: send { confirm: true }." });
+    return;
+  }
+  next();
+}
+
+function assertPlatform(platform) {
+  if (!["tiktok", "instagram", "youtube"].includes(platform)) {
+    throw new Error(`Unsupported platform: ${platform}`);
+  }
 }
 
 async function createServer() {
@@ -139,14 +235,102 @@ async function createServer() {
 
   app.use(express.json());
   app.use(createDashboardRequestGuard());
+  app.use((req, res, next) => {
+    res.setHeader(
+      "Content-Security-Policy",
+      "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; " +
+      "img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; " +
+      "base-uri 'self'; frame-ancestors 'none'"
+    );
+    next();
+  });
+  app.use(requireDashboardAccess);
   app.use(express.static(path.join(__dirname, "..", "web")));
+
+  app.get("/operations", (req, res) => {
+    res.sendFile(path.resolve(config.projectRoot, "web", "operations.html"));
+  });
 
   // TikTok endpoints (profile-aware)
 
   app.get("/api/status", async (req, res) => {
-    const daemons = await getActiveDaemons();
-    const status = await daemons.tiktok.getStatus();
-    res.json(status);
+    try {
+      const daemons = await getActiveDaemons();
+      const legacyStatus = await daemons.tiktok.getStatus();
+      const operations = await collectOperationsStatus();
+      res.json({ ...legacyStatus, operations, accounts: operations.accounts });
+    } catch (error) {
+      res.status(500).json({ ok: false, error: error.message });
+    }
+  });
+
+  app.get("/api/sessions/health", async (req, res) => {
+    try {
+      res.json(await collectSessionsHealth());
+    } catch (error) {
+      res.status(500).json({ ok: false, error: error.message });
+    }
+  });
+
+  app.post("/api/operations/scheduler/:action", async (req, res) => {
+    try {
+      const action = req.params.action;
+      if (!["pause", "resume"].includes(action)) {
+        return res.status(400).json({ ok: false, error: "Action must be pause or resume." });
+      }
+      const platform = req.body.platform || null;
+      if (platform) {
+        assertPlatform(platform);
+      }
+      const accounts = await getAllAccounts();
+      const results = [];
+      for (const account of accounts) {
+        const daemons = await getDaemons(account.id);
+        const targets = platform ? [platform] : ["tiktok", "instagram", "youtube"];
+        for (const target of targets) {
+          const result = action === "pause" ? daemons[target].stop() : daemons[target].start();
+          results.push({ accountId: account.id, platform: target, ...result });
+        }
+      }
+      res.json({ ok: true, action, platform, results });
+    } catch (error) {
+      res.status(400).json({ ok: false, error: error.message });
+    }
+  });
+
+  app.post("/api/operations/tick", async (req, res) => {
+    try {
+      const platform = req.body.platform || null;
+      if (platform) {
+        assertPlatform(platform);
+      }
+      const accounts = await getAllAccounts();
+      const results = [];
+      for (const account of accounts) {
+        const daemons = await getDaemons(account.id);
+        const targets = platform ? [platform] : ["tiktok", "instagram", "youtube"];
+        for (const target of targets) {
+          results.push({
+            accountId: account.id,
+            platform: target,
+            result: await daemons[target].runOnce("operations-dashboard"),
+          });
+        }
+      }
+      res.json({ ok: true, platform, results });
+    } catch (error) {
+      res.status(400).json({ ok: false, error: error.message });
+    }
+  });
+
+  app.post("/api/operations/requeue", async (req, res) => {
+    try {
+      const { accountId, platform, fileName } = req.body || {};
+      const result = await requeueFailedVideo({ accountId, platform, fileName });
+      res.json(result);
+    } catch (error) {
+      res.status(400).json({ ok: false, error: error.message });
+    }
   });
 
   app.post("/api/start", async (req, res) => {
@@ -263,7 +447,7 @@ async function createServer() {
   app.get("/api/accounts", async (req, res) => {
     const state = await getState();
     const active = await getActiveAccount();
-    res.json({ ...state, activeAccount: active });
+    res.json(serializeAccountsResponse(state, active));
   });
 
   app.post("/api/accounts/add", async (req, res) => {
@@ -272,7 +456,11 @@ async function createServer() {
       // Pre-initialize daemons for the new account
       await getDaemons(account.id);
       const state = await getState();
-      res.json({ ok: true, account, state });
+      res.json({
+        ok: true,
+        account: redactAccountState({ accounts: [account] }).accounts[0],
+        state: redactAccountState(state),
+      });
     } catch (error) {
       res.status(400).json({ ok: false, error: error.message });
     }
@@ -282,7 +470,11 @@ async function createServer() {
     try {
       const account = await selectAccount(req.body?.accountId);
       const state = await getState();
-      res.json({ ok: true, account, state });
+      res.json({
+        ok: true,
+        account: redactAccountState({ accounts: [account] }).accounts[0],
+        state: redactAccountState(state),
+      });
     } catch (error) {
       res.status(400).json({ ok: false, error: error.message });
     }
@@ -644,7 +836,18 @@ async function createServer() {
   });
 }
 
-createServer().catch((error) => {
-  console.error(error);
-  process.exit(1);
-});
+if (require.main === module) {
+  createServer().catch((error) => {
+    console.error(error);
+    process.exit(1);
+  });
+}
+
+module.exports = {
+  createServer,
+  ensureDashboardBindAllowed,
+  requireDashboardAccess,
+  redactAccountState,
+  redactProxy,
+  serializeAccountsResponse,
+};

@@ -1,17 +1,31 @@
 const API = {
+  token: "",
+  ensureToken() {
+    if (!this.token) {
+      this.token = window.prompt("Enter DASHBOARD_TOKEN:") || "";
+    }
+    return this.token;
+  },
   async get(endpoint) {
-    const res = await fetch(endpoint);
+    const res = await fetch(endpoint, {
+      headers: { "X-Dashboard-Token": this.ensureToken() },
+    });
     if (!res.ok) throw new Error(`API Error: ${res.status}`);
     return res.json();
   },
   async post(endpoint, body) {
+    this.ensureToken();
     const options = {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "X-Dashboard-Token": this.token,
+      },
     };
-    if (body !== undefined) {
-      options.body = JSON.stringify(body);
-    }
+    const payload = body && typeof body === "object" && !Array.isArray(body)
+      ? { ...body, confirm: true }
+      : { confirm: true };
+    options.body = JSON.stringify(payload);
     const res = await fetch(endpoint, options);
     if (!res.ok) throw new Error(`API Error: ${res.status}`);
     return res.json();

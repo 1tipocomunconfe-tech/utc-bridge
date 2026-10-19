@@ -4,6 +4,9 @@ const path = require("path");
 const cron = require("node-cron");
 const { config } = require("./config");
 const { postNextFromQueue } = require("./post-service");
+const { getNextQueuedItem } = require("./queue");
+const { createSchedulerPolicy } = require("./scheduler");
+const { getKillSwitchReason, isKillSwitchEnabled } = require("./kill-switch");
 
 function nowIso() {
   return new Date().toISOString();
@@ -60,6 +63,12 @@ class DaemonController {
     this._watchDebounce = null;
     this._scheduledTimers = new Set();
     this.statePath = options.statePath || path.resolve(config.projectRoot, "scheduler-state.json");
+    this.schedulerPolicy = createSchedulerPolicy({
+      platform: "tiktok",
+      accountId: this.accountId,
+      queueDir: this.queueDir,
+      getNextQueuedItem,
+    });
     this._loadState();
   }
 
@@ -158,6 +167,13 @@ class DaemonController {
   }
 
   async runOnce(source = "manual") {
+    if (isKillSwitchEnabled()) {
+      this.stop();
+      const result = { ok: true, skipped: true, paused: true, reason: getKillSwitchReason() };
+      this.lastResult = result;
+      this.log(getKillSwitchReason());
+      return result;
+    }
     if (this.isPosting) {
       return {
         ok: false,
@@ -170,7 +186,16 @@ class DaemonController {
     this.lastRunAt = nowIso();
     this.log(`Run triggered by ${source}.`);
 
+    let prepared = null;
+    let finalized = false;
     try {
+      prepared = await this.schedulerPolicy.prepare();
+      if (prepared.skipped) {
+        this.lastResult = prepared;
+        this.log(prepared.reason);
+        return prepared;
+      }
+
       const result = await postNextFromQueue({
         source,
         queueDir: this.queueDir,
@@ -178,6 +203,8 @@ class DaemonController {
         failedDir: this.failedDir,
         accountId: this.accountId,
       });
+      await this.schedulerPolicy.finish(prepared, result);
+      finalized = true;
       this.lastResult = result;
 
       if (result.skipped) {
@@ -193,6 +220,9 @@ class DaemonController {
 
       return result;
     } catch (error) {
+      if (prepared && !finalized) {
+        await this.schedulerPolicy.finish(prepared, { ok: false }).catch(() => { });
+      }
       const failedResult = {
         ok: false,
         error: error.message || "Unexpected scheduler error",
@@ -206,6 +236,11 @@ class DaemonController {
   }
 
   _scheduleWithJitter(source) {
+    if (isKillSwitchEnabled()) {
+      this.stop();
+      this.log(getKillSwitchReason());
+      return;
+    }
     const MAX_JITTER_MS = 10 * 60 * 1000; // 10 minutes
     const jitterMs = Math.floor(Math.random() * MAX_JITTER_MS);
     const jitterMin = Math.round(jitterMs / 1000 / 60 * 10) / 10;
@@ -229,6 +264,10 @@ class DaemonController {
   }
 
   start() {
+    if (isKillSwitchEnabled()) {
+      this.log(getKillSwitchReason());
+      return { ok: true, paused: true, reason: getKillSwitchReason() };
+    }
     if (this.task) {
       return {
         ok: true,
@@ -307,6 +346,10 @@ class DaemonController {
   }
 
   _startWatching() {
+    if (isKillSwitchEnabled()) {
+      this.log(getKillSwitchReason());
+      return;
+    }
     if (this._queueWatcher) return;
     const VIDEO_EXTS = new Set([".mp4", ".mov", ".webm", ".avi", ".mkv"]);
     try {
