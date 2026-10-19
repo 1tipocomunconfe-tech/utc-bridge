@@ -2,9 +2,17 @@ const path = require("path");
 const fs = require("fs/promises");
 const { chromium } = require("playwright");
 const { config } = require("./config");
+const { initStealth } = require("./stealth");
+const {
+  assertPageSession,
+  classifyError,
+  ERROR_TYPES,
+  withTransientRetries,
+} = require("./errors");
 const uiLabels = require("./platform-ui-labels");
 const {
   getActiveAccount,
+  getAccountProxy,
   getPlatformProfileDir,
   hasSavedPlatformSession,
 } = require("./account-manager");
@@ -15,13 +23,16 @@ let loginSessionAccountId = null;
 async function openPersistentContext(accountId) {
   const profileDir = await getPlatformProfileDir("youtube", accountId);
   await fs.mkdir(profileDir, { recursive: true });
-  return chromium.launchPersistentContext(profileDir, {
+  const context = await chromium.launchPersistentContext(profileDir, {
     headless: config.headless,
     viewport: { width: 1400, height: 1000 },
     locale: config.browserLocale,
     timezoneId: config.timezone,
+    proxy: await getAccountProxy(accountId),
     args: ["--disable-blink-features=AutomationControlled"],
   });
+  await initStealth(context, { accountId, locale: config.browserLocale, timezone: config.timezone });
+  return context;
 }
 
 async function gotoUploadPage(page) {
@@ -176,11 +187,12 @@ async function setVideoFile(page, videoPath) {
   }
 }
 
-async function setTitleAndDescription(page, caption, fileNameStem) {
-  const effectiveCaption = caption && caption.trim() ? caption.trim() : "";
-  const baseTitle = effectiveCaption || fileNameStem;
-  const shortTitle = baseTitle.slice(0, 95);
-  const descriptionText = effectiveCaption || config.defaultCaption || "";
+async function setTitleAndDescription(page, content, fileNameStem) {
+  const legacyCaption = typeof content === "string" ? content.trim() : "";
+  const title = typeof content === "object" ? String(content.title || "").trim() : legacyCaption;
+  const description = typeof content === "object" ? String(content.description || "").trim() : legacyCaption;
+  const shortTitle = (title || fileNameStem).slice(0, 95);
+  const descriptionText = description || config.defaultCaption || "";
 
   async function fillContentEditable(locator, value) {
     if ((await locator.count()) === 0) return false;
@@ -345,17 +357,31 @@ async function setVisibilityAndPublish(page) {
 }
 
 async function waitForPublishConfirmation(page) {
+  let sawProcessing = false;
   for (let i = 0; i < 40; i += 1) {
     const bodyText = await page.locator("body").innerText().catch(() => "");
-    if (uiLabels.pattern("youtubePublished").test(bodyText)) {
-      return { ok: true };
+    const currentUrl = page.url();
+    if (/studio\.youtube\.com\/(?:video|videos)\/(?!upload\b)[^/?#]+/i.test(currentUrl)) {
+      return { ok: true, reason: `Studio video URL confirmed: ${currentUrl}` };
+    }
+    const processing = uiLabels.pattern("youtubeProcessing").test(bodyText);
+    if (processing) {
+      sawProcessing = true;
+    } else if (uiLabels.pattern("youtubePublished").test(bodyText)) {
+      return { ok: true, reason: "YouTube final published state found." };
     }
     if (uiLabels.pattern("error").test(bodyText)) {
       return { ok: false, reason: "YouTube reported an error while publishing." };
     }
     await page.waitForTimeout(1500);
   }
-  return { ok: false, reason: "No reliable YouTube publish confirmation within timeout." };
+  return {
+    ok: false,
+    status: "uncertain",
+    reason: sawProcessing
+      ? "YouTube still reports processing; human verification is required."
+      : "No reliable YouTube publish confirmation within timeout.",
+  };
 }
 
 async function startLoginSession() {
@@ -404,52 +430,66 @@ async function closeLoginSession() {
   return { ok: true, alreadyClosed: false };
 }
 
-async function uploadVideo({ videoPath, caption, accountId }) {
+async function uploadVideoAttempt({ page, videoPath, caption, metadata }) {
   const absoluteVideoPath = path.resolve(videoPath);
+  await gotoUploadPage(page);
+  await assertPageSession(page, "youtube");
+  await setVideoFile(page, absoluteVideoPath);
+  await page.waitForTimeout(Math.max(config.postDelayMs, 5000));
+  await setTitleAndDescription(
+    page,
+    metadata?.caption?.youtube || caption,
+    path.parse(absoluteVideoPath).name
+  );
+  await markNotMadeForKids(page);
+  await setNotAgeRestricted(page);
+  await clickNext(page);
+  const published = await setVisibilityAndPublish(page);
+  if (!published) {
+    throw new Error("Could not find/click YouTube publish button.");
+  }
+
+  const confirmation = await waitForPublishConfirmation(page);
+  if (!confirmation.ok) {
+    if (confirmation.status === "uncertain" || /No reliable|timeout|processing/i.test(confirmation.reason)) {
+      return { ok: false, status: "uncertain", error: `Publish verification uncertain: ${confirmation.reason}` };
+    }
+    throw new Error(confirmation.reason);
+  }
+  return { ok: true };
+}
+
+async function uploadVideo({ videoPath, caption, metadata, accountId }) {
   const context = await openPersistentContext(accountId);
   const page = context.pages()[0] || (await context.newPage());
   let closeHoldMs = 0;
   try {
-    await gotoUploadPage(page);
-    await setVideoFile(page, absoluteVideoPath);
-    await page.waitForTimeout(Math.max(config.postDelayMs, 5000));
-    await setTitleAndDescription(
-      page,
-      caption,
-      path.parse(absoluteVideoPath).name
+    const result = await withTransientRetries(
+      () => uploadVideoAttempt({ page, videoPath, caption, metadata }),
+      {
+        classify: (error) => classifyError(error, { platform: "youtube" }),
+        onRetry: ({ attempt, delay, error }) => {
+          console.warn(`[${new Date().toISOString()}] [youtube] TRANSIENTE retry ${attempt}/2 in ${delay}ms: ${error.message}`);
+        },
+      }
     );
-    await markNotMadeForKids(page);
-    await setNotAgeRestricted(page);
-    await clickNext(page);
-    const published = await setVisibilityAndPublish(page);
-    if (!published) {
-      throw new Error("Could not find/click YouTube publish button.");
+    if (result.status === "uncertain") {
+      const screenshotPath = path.resolve(config.projectRoot, "last-youtube-upload-uncertain.png");
+      await page.screenshot({ path: screenshotPath, fullPage: true }).catch(() => { });
+      closeHoldMs = Math.max(config.failureHoldMs, 0);
+      return { ...result, errorType: ERROR_TYPES.DUDOSO, screenshotPath };
     }
 
-    const confirmation = await waitForPublishConfirmation(page);
-    if (!confirmation.ok) {
-      throw new Error(confirmation.reason);
-    }
-
-    const successScreenshotPath = path.resolve(
-      config.projectRoot,
-      "last-youtube-upload-success.png"
-    );
+    const successScreenshotPath = path.resolve(config.projectRoot, "last-youtube-upload-success.png");
     await page.screenshot({ path: successScreenshotPath, fullPage: true }).catch(() => { });
     closeHoldMs = Math.max(config.postPublishHoldMs, 0);
-    return { ok: true };
+    return { ok: true, status: "confirmed" };
   } catch (error) {
-    const screenshotPath = path.resolve(
-      config.projectRoot,
-      "last-youtube-upload-error.png"
-    );
+    const normalized = classifyError(error, { platform: "youtube" });
+    const screenshotPath = path.resolve(config.projectRoot, "last-youtube-upload-error.png");
     await page.screenshot({ path: screenshotPath, fullPage: true }).catch(() => { });
     closeHoldMs = Math.max(config.failureHoldMs, 0);
-    return {
-      ok: false,
-      error: error.message,
-      screenshotPath,
-    };
+    return { ok: false, status: "failed", error: normalized.message, errorType: normalized.type, screenshotPath };
   } finally {
     await page.waitForTimeout(closeHoldMs).catch(() => { });
     await context.close();
@@ -461,5 +501,6 @@ module.exports = {
   startLoginSession,
   getLoginSessionStatus,
   closeLoginSession,
+  _private: { waitForPublishConfirmation },
 };
 

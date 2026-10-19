@@ -2,9 +2,17 @@ const path = require("path");
 const fs = require("fs/promises");
 const { chromium } = require("playwright");
 const { config } = require("./config");
+const { initStealth } = require("./stealth");
+const {
+  assertPageSession,
+  classifyError,
+  ERROR_TYPES,
+  withTransientRetries,
+} = require("./errors");
 const uiLabels = require("./platform-ui-labels");
 const {
   getActiveAccount,
+  getAccountProxy,
   getPlatformProfileDir,
   hasSavedPlatformSession,
 } = require("./account-manager");
@@ -15,13 +23,16 @@ let loginSessionAccountId = null;
 async function openPersistentContext(accountId) {
   const profileDir = await getPlatformProfileDir("tiktok", accountId);
   await fs.mkdir(profileDir, { recursive: true });
-  return chromium.launchPersistentContext(profileDir, {
+  const context = await chromium.launchPersistentContext(profileDir, {
     headless: config.headless,
     viewport: { width: 1400, height: 1000 },
     locale: config.browserLocale,
     timezoneId: config.timezone,
+    proxy: await getAccountProxy(accountId),
     args: ["--disable-blink-features=AutomationControlled"],
   });
+  await initStealth(context, { accountId, locale: config.browserLocale, timezone: config.timezone });
+  return context;
 }
 
 async function gotoUploadPage(page) {
@@ -1067,10 +1078,7 @@ async function waitForPublishConfirmation(page, responseTracker) {
       }
 
       if (tracker.success()) {
-        return {
-          ok: true,
-          reason: "Publish API call succeeded.",
-        };
+        console.log("Publish API call succeeded; waiting for visible UI confirmation.");
       }
 
       if (hasSuccessCueText(bodyText)) {
@@ -1099,8 +1107,9 @@ async function waitForPublishConfirmation(page, responseTracker) {
       const urlChanged = page.url() !== startedUrl;
       if (urlChanged && !page.url().includes("/upload")) {
         return {
-          ok: true,
-          reason: `Navigation changed to ${page.url()}.`,
+          ok: false,
+          status: "uncertain",
+          reason: `Navigation changed without explicit publish confirmation: ${page.url()}.`,
         };
       }
 
@@ -1197,55 +1206,75 @@ async function startLoginSessionCli() {
   });
 }
 
-async function uploadVideo({ videoPath, caption, source, accountId }) {
+async function uploadVideoAttempt({ page, videoPath, caption, metadata, source }) {
   const absoluteVideoPath = path.resolve(videoPath);
-  const context = await openPersistentContext(accountId);
-  const page = context.pages()[0] || (await context.newPage());
-  let closeHoldMs = 0;
-  let publishResponseTracker = null;
-
+  await gotoUploadPage(page);
+  await assertPageSession(page, "tiktok");
+  await setVideoFile(page, absoluteVideoPath);
+  await waitForUploadReady(page);
+  await setCaption(page, metadata?.caption?.tiktok || caption || config.defaultCaption);
+  await addDefaultSound(page, source).catch((error) => {
+    console.log(`Sound step failed softly: ${error.message}`);
+  });
+  await disableShortContentCheck(page);
+  const publishResponseTracker = createPublishResponseTracker(page);
   try {
-    await gotoUploadPage(page);
-    await setVideoFile(page, absoluteVideoPath);
-    await waitForUploadReady(page);
-    await setCaption(page, caption || config.defaultCaption);
-    await addDefaultSound(page, source).catch((error) => {
-      console.log(`Sound step failed softly: ${error.message}`);
-    });
-    await disableShortContentCheck(page);
-    publishResponseTracker = createPublishResponseTracker(page);
     await clickPublish(page);
     const confirmation = await waitForPublishConfirmation(page, publishResponseTracker);
     if (!confirmation.ok) {
+      if (/No reliable|timeout/i.test(confirmation.reason)) {
+        return {
+          ok: false,
+          status: "uncertain",
+          error: `Publish verification uncertain: ${confirmation.reason}`,
+        };
+      }
       throw new Error(`Publish verification failed: ${confirmation.reason}`);
     }
-
-    const successScreenshotPath = path.resolve(
-      config.projectRoot,
-      "last-upload-success.png"
-    );
-    await page
-      .screenshot({ path: successScreenshotPath, fullPage: true })
-      .catch(() => { });
-
-    closeHoldMs = Math.max(config.postPublishHoldMs, 0);
     return { ok: true };
-  } catch (error) {
-    const screenshotPath = path.resolve(
-      config.projectRoot,
-      "last-upload-error.png"
+  } finally {
+    publishResponseTracker.dispose();
+  }
+}
+
+async function uploadVideo({ videoPath, caption, metadata, source, accountId }) {
+  const context = await openPersistentContext(accountId);
+  const page = context.pages()[0] || (await context.newPage());
+  let closeHoldMs = 0;
+  try {
+    const result = await withTransientRetries(
+      () => uploadVideoAttempt({ page, videoPath, caption, metadata, source }),
+      {
+        classify: (error) => classifyError(error, { platform: "tiktok" }),
+        onRetry: ({ attempt, delay, error }) => {
+          console.warn(`[${new Date().toISOString()}] [tiktok] TRANSIENTE retry ${attempt}/2 in ${delay}ms: ${error.message}`);
+        },
+      }
     );
+    if (result.status === "uncertain") {
+      const screenshotPath = path.resolve(config.projectRoot, "last-upload-uncertain.png");
+      await page.screenshot({ path: screenshotPath, fullPage: true }).catch(() => { });
+      closeHoldMs = Math.max(config.failureHoldMs, 0);
+      return { ...result, errorType: ERROR_TYPES.DUDOSO, screenshotPath };
+    }
+
+    const successScreenshotPath = path.resolve(config.projectRoot, "last-upload-success.png");
+    await page.screenshot({ path: successScreenshotPath, fullPage: true }).catch(() => { });
+    closeHoldMs = Math.max(config.postPublishHoldMs, 0);
+    return { ok: true, status: "confirmed" };
+  } catch (error) {
+    const normalized = classifyError(error, { platform: "tiktok" });
+    const screenshotPath = path.resolve(config.projectRoot, "last-upload-error.png");
     await page.screenshot({ path: screenshotPath, fullPage: true }).catch(() => { });
     closeHoldMs = Math.max(config.failureHoldMs, 0);
     return {
       ok: false,
-      error: error.message,
+      status: "failed",
+      error: normalized.message,
+      errorType: normalized.type,
       screenshotPath,
     };
   } finally {
-    if (publishResponseTracker) {
-      publishResponseTracker.dispose();
-    }
     await holdBrowserBeforeClose(page, closeHoldMs, "post-finalization");
     await context.close();
   }

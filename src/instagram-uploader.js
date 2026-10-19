@@ -2,9 +2,17 @@ const path = require("path");
 const fs = require("fs/promises");
 const { chromium } = require("playwright");
 const { config } = require("./config");
+const { initStealth } = require("./stealth");
+const {
+  assertPageSession,
+  classifyError,
+  ERROR_TYPES,
+  withTransientRetries,
+} = require("./errors");
 const uiLabels = require("./platform-ui-labels");
 const {
   getActiveAccount,
+  getAccountProxy,
   getPlatformProfileDir,
   hasSavedPlatformSession,
 } = require("./account-manager");
@@ -18,12 +26,13 @@ let loginSessionAccountId = null;
 async function openPersistentContext(accountId) {
   const profileDir = await getPlatformProfileDir("instagram", accountId);
   await fs.mkdir(profileDir, { recursive: true });
-  return chromium.launchPersistentContext(profileDir, {
+  const context = await chromium.launchPersistentContext(profileDir, {
     headless: config.headless,
     viewport: { width: 1400, height: 1000 },
     userAgent: REALISTIC_USER_AGENT,
     locale: config.browserLocale,
     timezoneId: config.timezone,
+    proxy: await getAccountProxy(accountId),
     args: [
       "--disable-blink-features=AutomationControlled",
       "--disable-infobars",
@@ -32,6 +41,8 @@ async function openPersistentContext(accountId) {
       "--disable-extensions",
     ],
   });
+  await initStealth(context, { accountId, locale: config.browserLocale, timezone: config.timezone });
+  return context;
 }
 
 /**
@@ -310,59 +321,74 @@ async function waitForPostConfirmation(page, startedUrl) {
 
     const currentUrl = page.url();
     if (currentUrl !== startedUrl && !/\/create\//i.test(currentUrl)) {
-      return { ok: true };
+      return {
+        ok: false,
+        status: "uncertain",
+        reason: `Navigation changed without explicit Instagram publish confirmation: ${currentUrl}.`,
+      };
     }
     await page.waitForTimeout(1500);
   }
   return { ok: false, reason: "No reliable Instagram post confirmation within timeout." };
 }
 
-async function uploadVideo({ videoPath, caption, accountId }) {
+async function uploadVideoAttempt({ page, videoPath, caption, metadata }) {
   const absoluteVideoPath = path.resolve(videoPath);
+  await gotoUploadPage(page);
+  await assertPageSession(page, "instagram");
+  await setVideoFile(page, absoluteVideoPath);
+  await page.waitForTimeout(Math.max(config.postDelayMs, 5000));
+  await clickNextButtons(page);
+  await setCaption(page, metadata?.caption?.instagram || caption || config.defaultCaption);
+
+  const startedUrl = page.url();
+  const shared = await clickShare(page);
+  if (!shared) {
+    throw new Error("Could not find/click Instagram Share button.");
+  }
+
+  const confirmation = await waitForPostConfirmation(page, startedUrl);
+  if (!confirmation.ok) {
+    if (confirmation.status === "uncertain" || /No reliable|timeout|without explicit/i.test(confirmation.reason)) {
+      return { ok: false, status: "uncertain", error: `Publish verification uncertain: ${confirmation.reason}` };
+    }
+    throw new Error(confirmation.reason);
+  }
+  return { ok: true };
+}
+
+async function uploadVideo({ videoPath, caption, metadata, accountId }) {
   const context = await openPersistentContext(accountId);
   const page = context.pages()[0] || (await context.newPage());
   let closeHoldMs = 0;
 
   try {
-    await gotoUploadPage(page);
-    await setVideoFile(page, absoluteVideoPath);
-    await page.waitForTimeout(Math.max(config.postDelayMs, 5000));
-    await clickNextButtons(page);
-    await setCaption(page, caption || config.defaultCaption);
-
-    const startedUrl = page.url();
-    const shared = await clickShare(page);
-    if (!shared) {
-      throw new Error("Could not find/click Instagram Share button.");
-    }
-
-    const confirmation = await waitForPostConfirmation(page, startedUrl);
-    if (!confirmation.ok) {
-      throw new Error(confirmation.reason);
-    }
-
-    const successScreenshotPath = path.resolve(
-      config.projectRoot,
-      "last-instagram-upload-success.png"
+    const result = await withTransientRetries(
+      () => uploadVideoAttempt({ page, videoPath, caption, metadata }),
+      {
+        classify: (error) => classifyError(error, { platform: "instagram" }),
+        onRetry: ({ attempt, delay, error }) => {
+          console.warn(`[${new Date().toISOString()}] [instagram] TRANSIENTE retry ${attempt}/2 in ${delay}ms: ${error.message}`);
+        },
+      }
     );
+    if (result.status === "uncertain") {
+      const screenshotPath = path.resolve(config.projectRoot, "last-instagram-upload-uncertain.png");
+      await page.screenshot({ path: screenshotPath, fullPage: true }).catch(() => { });
+      closeHoldMs = Math.max(config.failureHoldMs, 0);
+      return { ...result, errorType: ERROR_TYPES.DUDOSO, screenshotPath };
+    }
+
+    const successScreenshotPath = path.resolve(config.projectRoot, "last-instagram-upload-success.png");
     await page.screenshot({ path: successScreenshotPath, fullPage: true }).catch(() => { });
-
-    // Hold the browser open so background processing finishes
     closeHoldMs = Math.max(config.postPublishHoldMs || 15000, 15000);
-    return { ok: true };
+    return { ok: true, status: "confirmed" };
   } catch (error) {
-    const screenshotPath = path.resolve(
-      config.projectRoot,
-      "last-instagram-upload-error.png"
-    );
+    const normalized = classifyError(error, { platform: "instagram" });
+    const screenshotPath = path.resolve(config.projectRoot, "last-instagram-upload-error.png");
     await page.screenshot({ path: screenshotPath, fullPage: true }).catch(() => { });
-
     closeHoldMs = Math.max(config.failureHoldMs, 0);
-    return {
-      ok: false,
-      error: error.message,
-      screenshotPath,
-    };
+    return { ok: false, status: "failed", error: normalized.message, errorType: normalized.type, screenshotPath };
   } finally {
     if (closeHoldMs > 0) {
       console.log(`Holding browser for ${closeHoldMs / 1000}s before closing...`);

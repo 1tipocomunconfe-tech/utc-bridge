@@ -2,14 +2,16 @@ const fs = require("fs/promises");
 const path = require("path");
 const { config } = require("./config");
 const { getNextQueuedItem, getCaptionPaths } = require("./youtube-queue");
+const { getMetadataPath } = require("./meta-loader");
 const { uploadVideo } = require("./youtube-uploader");
 const { ensureDirectories, fileExists, moveWithTimestamp } = require("./fs-utils");
+const { postWithResult, reconcileSeenState } = require("./post-finalizer");
 
-async function moveCaptionsIfExists(captionPaths, targetDir) {
+async function moveSidecarsIfExists(sidecarPaths, targetDir) {
   const moved = [];
-  for (const cp of captionPaths) {
+  for (const cp of sidecarPaths) {
     if (await fileExists(cp)) {
-      const result = await moveFileSafely(cp, targetDir, "caption file");
+      const result = await moveFileSafely(cp, targetDir, "sidecar file");
       if (result) moved.push(result);
     }
   }
@@ -25,50 +27,35 @@ async function moveFileSafely(sourcePath, targetDir, label) {
   }
 }
 
-async function postSingleVideo({ videoPath, caption, postedDir, failedDir, accountId }) {
-  const posted = postedDir || config.youtubePostedDir;
-  const failed = failedDir || config.youtubeFailedDir;
-  await ensureDirectories([posted, failed]);
-
-  const result = await uploadVideo({ videoPath, caption, accountId });
-  const captionPaths = getCaptionPaths(videoPath);
-
-  if (result.ok) {
-    const movedVideo = await moveFileSafely(videoPath, posted, "posted video");
-    const movedCaption = await moveCaptionsIfExists(captionPaths, posted);
-    if (!movedVideo) {
-      return {
-        ok: false,
-        error: "Video posted, but could not archive file from YouTube queue.",
-        screenshotPath: result.screenshotPath,
-      };
-    }
-    return { ok: true, movedVideo, movedCaption };
-  }
-
-  const movedVideo = await moveFileSafely(videoPath, failed, "failed video");
-  const movedCaption = await moveCaptionsIfExists(captionPaths, failed);
-  return {
-    ok: false,
-    movedVideo,
-    movedCaption,
-    error: result.error,
-    screenshotPath: result.screenshotPath,
-  };
+async function postSingleVideo({ videoPath, caption, metadata, postedDir, failedDir, uncertainDir, accountId, uploadVideoFn = uploadVideo, seen, notifier }) {
+  return postWithResult({
+    platform: "youtube",
+    videoPath,
+    caption,
+    metadata,
+    postedDir: postedDir || config.youtubePostedDir,
+    failedDir: failedDir || config.youtubeFailedDir,
+    uncertainDir,
+    accountId,
+    uploadVideoFn,
+    seen,
+    notifier,
+  });
 }
 
-async function postNextFromQueue({ source, queueDir, postedDir, failedDir, accountId } = {}) {
+async function postNextFromQueue({ source, queueDir, postedDir, failedDir, uncertainDir, accountId, notifier } = {}) {
   const queue = queueDir || config.youtubeQueueDir;
   const posted = postedDir || config.youtubePostedDir;
   const failed = failedDir || config.youtubeFailedDir;
   await ensureDirectories([queue, posted, failed]);
+  await reconcileSeenState(notifier);
 
   const nextItem = await getNextQueuedItem(queue);
   if (!nextItem) {
     return { ok: true, skipped: true, reason: "YouTube queue is empty." };
   }
 
-  return postSingleVideo({ ...nextItem, postedDir: posted, failedDir: failed, accountId });
+  return postSingleVideo({ ...nextItem, source, postedDir: posted, failedDir: failed, uncertainDir, accountId, notifier });
 }
 
 async function postFromManualInput(videoPath, caption) {
@@ -81,6 +68,7 @@ async function postFromManualInput(videoPath, caption) {
 }
 
 module.exports = {
+  postSingleVideo,
   postNextFromQueue,
   postFromManualInput,
 };

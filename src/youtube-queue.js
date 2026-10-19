@@ -1,6 +1,7 @@
 const fs = require("fs/promises");
 const path = require("path");
 const { config } = require("./config");
+const { getNextQueuedItemForPlatform } = require("./queue");
 
 const VIDEO_EXTENSIONS = new Set([".mp4", ".mov", ".webm", ".avi", ".mkv"]);
 
@@ -47,18 +48,18 @@ function pickNextVideo(videos) {
   return videos[0];
 }
 
-async function getNextQueuedItem(queueDir) {
-  const videos = await listQueueVideos(queueDir);
-  const videoPath = pickNextVideo(videos);
-  if (!videoPath) {
+async function getNextQueuedItem(queueDir, nowValue) {
+  const item = await getNextQueuedItemForPlatform(
+    queueDir || config.youtubeQueueDir,
+    "youtube",
+    nowValue
+  );
+  if (!item) {
     return null;
   }
-
-  const caption = await readCaption(videoPath);
   return {
-    videoPath,
-    caption,
-    captionPaths: getCaptionPaths(videoPath),
+    ...item,
+    caption: item.metadata.caption.youtube.description,
   };
 }
 
