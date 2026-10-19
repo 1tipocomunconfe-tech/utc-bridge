@@ -21,7 +21,7 @@ const FATAL_PATTERNS = [
 const SESSION_PATTERNS = [
   /\blog\s*in\b|\bsign\s*in\b|\blogin\b|\bsignin\b/i,
   /2fa|two[- ]factor|verification code|security challenge/i,
-  /iniciar sesi[oó]n|anmelden|connexion/i,
+  /iniciar sesi[o\u00f3]n|anmelden|connexion/i,
 ];
 
 class AutoSocialError extends Error {

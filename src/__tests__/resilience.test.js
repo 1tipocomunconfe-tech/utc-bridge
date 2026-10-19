@@ -74,6 +74,23 @@ test("concurrent quota reservations stay within the cap", async () => {
   assert.equal((await stores[0].getStatus("account", "tiktok", new Date("2026-10-21T12:00:00Z"))).count, 2);
 });
 
+test("daily cap one permits exactly one concurrent reservation", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "autosocial-limits-cap-one-"));
+  const options = {
+    statePath: path.join(root, "limits.json"),
+    timezone: "UTC",
+    caps: { tiktok: 1, instagram: 2, youtube: 2 },
+    staleLockMs: 100,
+  };
+  const stores = [new LimitsStore(options), new LimitsStore(options)];
+  const at = new Date("2026-10-21T12:00:00Z");
+  const results = await Promise.all(stores.map((store) => store.reserve("account", "tiktok", at)));
+
+  assert.equal(results.filter((result) => result.ok).length, 1);
+  assert.equal(results.filter((result) => !result.ok).length, 1);
+  assert.equal((await stores[0].getStatus("account", "tiktok", at)).count, 1);
+});
+
 test("YouTube processing is uncertain, not confirmed", async () => {
   const page = {
     url: () => "https://studio.youtube.com/video/upload",

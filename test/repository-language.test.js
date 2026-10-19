@@ -6,10 +6,13 @@ const { spawnSync } = require("child_process");
 
 const projectRoot = path.resolve(__dirname, "..");
 const excludedTextFiles = new Set([
+  "docs/AUDITORIA-RE.md",
+  "docs/AUDITORIA.md",
+  "docs/ESTADO-BASE.md",
   "src/platform-ui-labels.js",
   "test/repository-language.test.js",
 ]);
-const binaryExtensions = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico"]);
+const binaryExtensions = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico", ".ttf", ".woff2"]);
 const localizedTermHex = [
   "776569746572",
   "7465696c656e",

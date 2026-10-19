@@ -73,7 +73,7 @@ class Notifier {
     }
     const timestamp = getTimestamp(publishedAt);
     const text = [
-      "✅ AutoSocial+ publicado",
+      "\u2705 AutoSocial+ publicado",
       `Plataforma: ${platform || "desconocida"}`,
       `Cuenta: ${accountId}`,
       `Archivo: ${getFileName(videoPath)}`,
@@ -87,7 +87,7 @@ class Notifier {
       return { sent: false, skipped: true };
     }
     const text = [
-      "❌ AutoSocial+ fallo de publicación",
+      "\u274c AutoSocial+ fallo de publicaci\u00f3n",
       `Plataforma: ${platform || "desconocida"}`,
       `Cuenta: ${accountId}`,
       `Archivo: ${getFileName(videoPath)}`,
@@ -102,11 +102,11 @@ class Notifier {
       return { sent: false, skipped: true };
     }
     const text = [
-      "🚨 CRÍTICO: sesión expirada",
+      "\ud83d\udea8 CR\u00cdTICO: sesi\u00f3n expirada",
       `Plataforma: ${platform || "desconocida"}`,
       `Cuenta: ${accountId}`,
       `Archivo: ${getFileName(videoPath)}`,
-      "Acción: necesita re-login humano.",
+      "Acci\u00f3n: necesita re-login humano.",
       `Hora: ${getTimestamp(timestamp)}`,
     ].join("\n");
     return this._broadcast(text, screenshotPath);
@@ -117,7 +117,7 @@ class Notifier {
       return { sent: false, skipped: true };
     }
     const text = [
-      "📊 AutoSocial+ resumen diario",
+      "\ud83d\udcca AutoSocial+ resumen diario",
       `Cuenta: ${accountId}`,
       `Publicados: ${published}`,
       `Fallidos: ${failed}`,

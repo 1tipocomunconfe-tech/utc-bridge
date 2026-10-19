@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>AutoSocial+ local stealth fixture</title>
+  <style>
+    body { font-family: sans-serif; margin: 2rem; }
+    dt { font-weight: 700; margin-top: 0.75rem; }
+  </style>
+</head>
+<body>
+  <h1>Browser signal checks</h1>
+  <dl>
+    <dt>webdriver</dt><dd id="webdriver"></dd>
+    <dt>languages</dt><dd id="languages"></dd>
+    <dt>timezone</dt><dd id="timezone"></dd>
+    <dt>plugins</dt><dd id="plugins"></dd>
+    <dt>canvas</dt><dd id="canvas"></dd>
+    <dt>webgl</dt><dd id="webgl"></dd>
+  </dl>
+  <script>
+    const canvas = document.createElement("canvas");
+    const context = canvas.getContext("2d");
+    let webgl = "unavailable";
+    try {
+      webgl = canvas.getContext("webgl") ? "available" : "unavailable";
+    } catch {
+      webgl = "blocked";
+    }
+    document.querySelector("#webdriver").textContent = String(navigator.webdriver);
+    document.querySelector("#languages").textContent = navigator.languages.join(", ");
+    document.querySelector("#timezone").textContent = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    document.querySelector("#plugins").textContent = String(navigator.plugins.length);
+    document.querySelector("#canvas").textContent = context ? "available" : "unavailable";
+    document.querySelector("#webgl").textContent = webgl;
+  </script>
+</body>
+</html>

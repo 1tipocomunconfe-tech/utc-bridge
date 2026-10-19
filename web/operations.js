@@ -6,7 +6,7 @@ function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[char]));
 }
 function showMessage(text, type) { message.textContent = text; message.className = `status ${type || ""}`; }
-function formatDate(value) { return value ? new Date(value).toLocaleString() : "—"; }
+function formatDate(value) { return value ? new Date(value).toLocaleString() : "-"; }
 function confirmAction(label) { return window.confirm(`${label}\n\nThis action changes the local scheduler or queue.`); }
 function getToken() {
   if (!dashboardToken) {
@@ -41,14 +41,14 @@ function renderQueues(data) {
   for (const [accountId, account] of Object.entries(accounts)) {
     for (const [platform, state] of Object.entries(account.platforms || {})) {
       const quota = state.quota || {};
-      const errors = (state.recentErrors || []).map((item) => `<div class="small bad-text">${escapeHtml(item.motivo)}${item.fileName ? ` <button data-action="requeue" data-account="${escapeHtml(accountId)}" data-platform="${platform}" data-file-name="${escapeHtml(item.fileName)}">Requeue</button>` : ""}</div>`).join("") || "—";
-      const pending = (state.pendingFiles || []).length ? state.pendingFiles.map((file) => `<span class="pill">${escapeHtml(file)}</span>`).join("") : "—";
+      const errors = (state.recentErrors || []).map((item) => `<div class="small bad-text">${escapeHtml(item.motivo)}${item.fileName ? ` <button data-action="requeue" data-account="${escapeHtml(accountId)}" data-platform="${platform}" data-file-name="${escapeHtml(item.fileName)}">Requeue</button>` : ""}</div>`).join("") || "-";
+      const pending = (state.pendingFiles || []).length ? state.pendingFiles.map((file) => `<span class="pill">${escapeHtml(file)}</span>`).join("") : "-";
       rows.push(`<tr>
         <td><strong>${escapeHtml(account.name || accountId)}</strong><br><span class="muted small">${escapeHtml(platform)}</span></td>
         <td>${state.counts?.pending || 0} / ${state.counts?.posted || 0} / ${state.counts?.failed || 0}<div class="small muted">pending / posted / failed</div></td>
-        <td>${quota.count || 0} / ${quota.cap ?? "—"}<div class="small muted">quota used / cap</div></td>
+        <td>${quota.count || 0} / ${quota.cap ?? "-"}<div class="small muted">quota used / cap</div></td>
         <td>${escapeHtml(formatDate(state.nextScheduledAt))}<div class="small">${pending}</div></td>
-        <td>${escapeHtml(formatDate(state.lastPublication?.at))}<div class="small">${escapeHtml(state.lastPublication?.fileName || "—")}</div></td>
+        <td>${escapeHtml(formatDate(state.lastPublication?.at))}<div class="small">${escapeHtml(state.lastPublication?.fileName || "-")}</div></td>
         <td>${errors}</td>
         <td class="nowrap">${platformButtons(accountId, platform, state.scheduler?.running)}</td>
       </tr>`);
@@ -61,7 +61,7 @@ function renderHealth(data) {
   for (const [accountId, account] of Object.entries(data.accounts || {})) {
     for (const [platform, health] of Object.entries(account.platforms || {})) {
       const suspicious = health.suspiciousExpiration;
-      rows.push(`<tr><td>${escapeHtml(account.name || accountId)}</td><td>${escapeHtml(platform)}</td><td>${health.profileExists ? "✅" : "❌"}</td><td>${health.cookiesPresent ? "✅" : "❌"}</td><td>${escapeHtml(formatDate(health.lastProfileUse))}</td><td class="${suspicious ? "warn-text" : "good-text"}">${suspicious ? "Suspicious expiration" : (health.cookiesLikelyValid ? "Heuristic healthy" : "Needs manual login check")}</td></tr>`);
+      rows.push(`<tr><td>${escapeHtml(account.name || accountId)}</td><td>${escapeHtml(platform)}</td><td>${health.profileExists ? "OK" : "NO"}</td><td>${health.cookiesPresent ? "OK" : "NO"}</td><td>${escapeHtml(formatDate(health.lastProfileUse))}</td><td class="${suspicious ? "warn-text" : "good-text"}">${suspicious ? "Suspicious expiration" : (health.cookiesLikelyValid ? "Heuristic healthy" : "Needs manual login check")}</td></tr>`);
     }
   }
   document.getElementById("healthTable").innerHTML = rows.length ? `<table><thead><tr><th>Account</th><th>Platform</th><th>Profile</th><th>Cookies</th><th>Last profile use</th><th>Result</th></tr></thead><tbody>${rows.join("")}</tbody></table>` : `<div class="empty">No sessions detected.</div>`;

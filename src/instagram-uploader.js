@@ -308,18 +308,47 @@ async function clickShare(page) {
   return false;
 }
 
+function isInstagramPostUrl(value) {
+  try {
+    const parsed = new URL(value);
+    return parsed.hostname === "www.instagram.com" && /^\/(p|reel|tv)\/[A-Za-z0-9_-]+/.test(parsed.pathname);
+  } catch {
+    return false;
+  }
+}
+
+async function getInstagramConfirmationText(page) {
+  const confirmationLocator = page.locator([
+    "[role='alert']",
+    "[role='dialog']",
+    "[aria-live='assertive']",
+    "[aria-live='polite']",
+    "[data-testid*='toast' i]",
+    "[data-testid*='success' i]",
+    "[class*='toast' i]",
+    "[class*='success' i]",
+  ].join(", "));
+  return confirmationLocator.allInnerTexts().catch(() => []);
+}
+
 async function waitForPostConfirmation(page, startedUrl) {
   // Wait up to 60 * 1500ms = 90 seconds for upload processing
+  let sawGenericBodyConfirmation = false;
   for (let i = 0; i < 60; i += 1) {
     const text = await page.locator("body").innerText().catch(() => "");
-    if (uiLabels.pattern("posted").test(text)) {
+    const currentUrl = page.url();
+    if (isInstagramPostUrl(currentUrl)) {
       return { ok: true };
     }
+    const confirmationText = (await getInstagramConfirmationText(page)).join("\n");
+    if (uiLabels.pattern("posted").test(confirmationText)) {
+      return { ok: true };
+    }
+    sawGenericBodyConfirmation ||= uiLabels.pattern("posted").test(text);
     if (uiLabels.pattern("error").test(text)) {
       return { ok: false, reason: "Instagram reported an error while posting." };
     }
 
-    const currentUrl = page.url();
     if (currentUrl !== startedUrl && !/\/create\//i.test(currentUrl)) {
       return {
         ok: false,
@@ -329,7 +358,14 @@ async function waitForPostConfirmation(page, startedUrl) {
     }
     await page.waitForTimeout(1500);
   }
-  return { ok: false, reason: "No reliable Instagram post confirmation within timeout." };
+  return {
+    ok: false,
+    status: "uncertain",
+    reason: "No reliable Instagram post confirmation within timeout.",
+    ...(sawGenericBodyConfirmation
+      ? { detail: "Generic body confirmation was observed without a specific confirmation container." }
+      : {}),
+  };
 }
 
 async function uploadVideoAttempt({ page, videoPath, caption, metadata }) {
@@ -403,5 +439,9 @@ module.exports = {
   startLoginSession,
   getLoginSessionStatus,
   closeLoginSession,
+  _private: {
+    isInstagramPostUrl,
+    waitForPostConfirmation,
+  },
 };
 

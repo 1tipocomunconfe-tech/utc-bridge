@@ -76,7 +76,7 @@ async function run() {
       () => {},
       async () => {
         await runScheduledPost();
-        startDaemon();
+        await startDaemon();
       }
     )
     .command(

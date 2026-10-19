@@ -934,6 +934,30 @@ function hasSuccessCueText(text) {
   return successPatterns.some((pattern) => pattern.test(text));
 }
 
+function isTikTokPostUrl(value) {
+  try {
+    const parsed = new URL(value);
+    return parsed.hostname === "www.tiktok.com" && /^\/@[^/]+\/video\/\d+/.test(parsed.pathname);
+  } catch {
+    return false;
+  }
+}
+
+async function getTikTokConfirmationText(page) {
+  const confirmationLocator = page.locator([
+    "[role='alert']",
+    "[role='dialog']",
+    "[aria-live='assertive']",
+    "[aria-live='polite']",
+    "[data-e2e*='toast' i]",
+    "[data-testid*='toast' i]",
+    "[data-testid*='success' i]",
+    "[class*='toast' i]",
+    "[class*='success' i]",
+  ].join(", "));
+  return confirmationLocator.allInnerTexts().catch(() => []);
+}
+
 function hasFailureCueText(text) {
   const failurePatterns = [
     uiLabels.pattern("tiktokFailed"),
@@ -1052,6 +1076,7 @@ async function waitForPublishConfirmation(page, responseTracker) {
   const tracker = responseTracker || createPublishResponseTracker(page);
   const ownsTracker = !responseTracker;
   let primaryRetryCount = 0;
+  let sawGenericBodyConfirmation = false;
 
   try {
     for (let attempt = 0; attempt < 30; attempt += 1) {
@@ -1081,12 +1106,22 @@ async function waitForPublishConfirmation(page, responseTracker) {
         console.log("Publish API call succeeded; waiting for visible UI confirmation.");
       }
 
-      if (hasSuccessCueText(bodyText)) {
+      const currentUrl = page.url();
+      if (isTikTokPostUrl(currentUrl)) {
         return {
           ok: true,
-          reason: "Success confirmation text found.",
+          reason: `TikTok post permalink detected: ${currentUrl}.`,
         };
       }
+
+      const confirmationText = (await getTikTokConfirmationText(page)).join("\n");
+      if (hasSuccessCueText(confirmationText)) {
+        return {
+          ok: true,
+          reason: "Specific TikTok confirmation container found.",
+        };
+      }
+      sawGenericBodyConfirmation ||= hasSuccessCueText(bodyText);
 
       await trySecondaryPublishConfirm(page);
 
@@ -1104,12 +1139,12 @@ async function waitForPublishConfirmation(page, responseTracker) {
         }
       }
 
-      const urlChanged = page.url() !== startedUrl;
-      if (urlChanged && !page.url().includes("/upload")) {
+      const urlChanged = currentUrl !== startedUrl;
+      if (urlChanged && !currentUrl.includes("/upload")) {
         return {
           ok: false,
           status: "uncertain",
-          reason: `Navigation changed without explicit publish confirmation: ${page.url()}.`,
+          reason: `Navigation changed without explicit publish confirmation: ${currentUrl}.`,
         };
       }
 
@@ -1118,7 +1153,11 @@ async function waitForPublishConfirmation(page, responseTracker) {
 
     return {
       ok: false,
+      status: "uncertain",
       reason: "No reliable publish confirmation observed within timeout.",
+      ...(sawGenericBodyConfirmation
+        ? { detail: "Generic body confirmation was observed without a specific confirmation container." }
+        : {}),
     };
   } finally {
     if (ownsTracker) {
@@ -1222,7 +1261,7 @@ async function uploadVideoAttempt({ page, videoPath, caption, metadata, source }
     await clickPublish(page);
     const confirmation = await waitForPublishConfirmation(page, publishResponseTracker);
     if (!confirmation.ok) {
-      if (/No reliable|timeout/i.test(confirmation.reason)) {
+      if (confirmation.status === "uncertain" || /No reliable|timeout/i.test(confirmation.reason)) {
         return {
           ok: false,
           status: "uncertain",
@@ -1289,5 +1328,7 @@ module.exports = {
   _private: {
     getPublishCandidateScore,
     isLikelyPublishCandidateInfo,
+    isTikTokPostUrl,
+    waitForPublishConfirmation,
   },
 };
