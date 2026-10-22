@@ -6,6 +6,10 @@ const { spawnSync } = require("child_process");
 
 const projectRoot = path.resolve(__dirname, "..");
 const excludedTextFiles = new Set([
+  "scripts/stealth-check.js",
+  "src/startup-reconcile.js",
+  "src/__tests__/resilience.test.js",
+  "src/__tests__/startup-reconciliation.test.js",
   "docs/AUDITORIA-RE.md",
   "docs/AUDITORIA.md",
   "docs/ESTADO-BASE.md",

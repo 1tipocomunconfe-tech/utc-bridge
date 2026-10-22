@@ -1,6 +1,6 @@
 const path = require("path");
 const fs = require("fs/promises");
-const { chromium } = require("playwright");
+const { webkit } = require("playwright");
 const { config } = require("./config");
 const { initStealth } = require("./stealth");
 const {
@@ -23,7 +23,7 @@ let loginSessionAccountId = null;
 async function openPersistentContext(accountId) {
   const profileDir = await getPlatformProfileDir("tiktok", accountId);
   await fs.mkdir(profileDir, { recursive: true });
-  const context = await chromium.launchPersistentContext(profileDir, {
+  const context = await webkit.launchPersistentContext(profileDir, {
     headless: config.headless,
     viewport: { width: 1400, height: 1000 },
     locale: config.browserLocale,

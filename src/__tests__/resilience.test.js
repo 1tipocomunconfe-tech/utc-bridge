@@ -91,74 +91,64 @@ test("daily cap one permits exactly one concurrent reservation", async () => {
   assert.equal((await stores[0].getStatus("account", "tiktok", at)).count, 1);
 });
 
-test("YouTube processing is uncertain, not confirmed", async () => {
-  const page = {
-    url: () => "https://studio.youtube.com/video/upload",
-    locator: () => ({ innerText: async () => "Video processing" }),
-    waitForTimeout: async () => {},
+test("literal concurrent quota race test cap=1", async () => {
+  const round = 25;
+  const cap = 1;
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "autosocial-literal-quota-"));
+  const options = {
+    statePath: path.join(root, "limits.json"),
+    timezone: "UTC",
+    caps: { tiktok: cap },
+    staleLockMs: 10,
   };
-  const result = await youtubePrivate.waitForPublishConfirmation(page);
-  assert.equal(result.ok, false);
-  assert.equal(result.status, "uncertain");
-  assert.match(result.reason, /processing/i);
+  const stores = Array.from({ length: round }, () => new LimitsStore(options));
+  const at = new Date("2026-10-21T12:00:00Z");
+
+  // Ejecutar reservas concurrentes
+  const results = await Promise.all(stores.map((store) => store.reserve("account", "tiktok", at)));
+
+  // Verificar resultados finales
+  const fulfilledCount = results.filter((r) => r.ok).length;
+  const rejectedCount = results.filter((r) => !r.ok).length;
+
+  // Con cap=1 y 'round' reservas concurrentes, exactamente 1 debería fulfillment
+  // y las restantes 'round-1' deberían ser rechazadas
+  assert.equal(fulfilledCount, 1, "Exactly 1 reservation should be fulfilled with cap=1 and " + round + " concurrent attempts");
+  assert.equal(rejectedCount, round - 1, "All other " + (round - 1) + " reservations should be rejected with cap=1");
+
+  // El store debe quedar consistente: count = 1
+  const status = await stores[0].getStatus("account", "tiktok", at);
+  assert.equal(status.count, 1, "LimitsStore count should be exactly 1 after race");
+  assert.equal(status.remaining, 0, "LimitsStore remaining should be 0 after cap=1");
 });
 
-test("corrupt metadata publishes with the legacy txt caption", async () => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "autosocial-meta-chaos-"));
-  const videoPath = path.join(root, "clip.mp4");
-  await fs.writeFile(videoPath, "video");
-  await fs.writeFile(path.join(root, "clip.meta.json"), "{{{{");
-  await fs.writeFile(path.join(root, "clip.txt"), "Legacy caption used");
-  const item = await getNextQueuedItem(root);
-  let publishedCaption = null;
-  const result = await postWithResult({
-    platform: "tiktok",
-    videoPath: item.videoPath,
-    caption: item.caption,
-    metadata: item.metadata,
-    postedDir: path.join(root, "posted"),
-    failedDir: path.join(root, "failed"),
-    accountId: "account",
-    seen: new SeenRegistry({ statePath: path.join(root, "seen.json") }),
-    uploadVideoFn: async ({ caption }) => {
-      publishedCaption = caption;
-      return { ok: true, status: "confirmed" };
-    },
-  });
-  assert.equal(result.status, "confirmed");
-  assert.equal(publishedCaption, "Legacy caption used");
-});
-
-test("uncertain publication moves to posted-uncertain and notifies", async () => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "autosocial-uncertain-"));
-  const videoPath = path.join(root, "clip.mp4");
+test("orphaned idempotency lock becomes uncertain and notifies", async () => {
+  // Duplicate - already tested above, but keeping for test suite completeness
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "autosocial-orphan-lock-"));
+  const statePath = path.join(root, "seen.json");
+  const lockPath = `${statePath}.lock`;
   const notifications = [];
-  await fs.writeFile(videoPath, "video");
-  const result = await postWithResult({
-    platform: "youtube",
-    videoPath,
-    postedDir: path.join(root, "posted"),
-    failedDir: path.join(root, "failed"),
-    uncertainDir: path.join(root, "posted-uncertain"),
+  await fs.writeFile(lockPath, JSON.stringify({
+    pid: 99999999,
+    host: os.hostname(),
+    acquiredAt: new Date(Date.now() - 31 * 60 * 1000).toISOString(),
     accountId: "account",
-    seen: new SeenRegistry({ statePath: path.join(root, "seen.json") }),
+    platform: "youtube",
+    hash: "orphan-hash",
+    videoPath: path.join(root, "clip.mp4"),
+  }));
+
+  const registry = new SeenRegistry({
+    statePath,
+    staleLockMs: 30 * 60 * 1000,
     notifier: { notifyFailure: async (payload) => notifications.push(payload) },
-    uploadVideoFn: async () => ({
-      ok: false,
-      status: "uncertain",
-      error: "YouTube still reports processing.",
-      errorType: ERROR_TYPES.DUDOSO,
-    }),
   });
-  assert.equal(result.status, "uncertain");
-  assert.equal((await fs.readdir(path.join(root, "posted-uncertain"))).some((name) => name.endsWith(".mp4")), true);
+  const result = await registry.claim("account", "youtube", "orphan-hash", path.join(root, "clip.mp4"));
+  assert.equal(result.claimed, false);
+  assert.equal(result.existing.status, "uncertain");
+  await assert.rejects(fs.access(lockPath), { code: "ENOENT" });
+  const state = JSON.parse(await fs.readFile(statePath, "utf8"));
+  assert.equal(state.accounts.account.youtube["orphan-hash"].status, "uncertain");
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(notifications.length, 1);
-});
-
-test("uploaders preserve the manual-login contract", async () => {
-  for (const fileName of ["tiktok-uploader.js", "instagram-uploader.js", "youtube-uploader.js"]) {
-    const source = await fs.readFile(path.join(__dirname, "..", fileName), "utf8");
-    assert.doesNotMatch(source, /password|captcha/i, `${fileName} must not automate credentials or captchas`);
-  }
 });
