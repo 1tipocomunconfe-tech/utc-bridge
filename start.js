@@ -1,8 +1,15 @@
-// 🌟 Punto de entrada para Render
-require('dotenv').config();
+const dotenv = require('dotenv');
+dotenv.config();
 
 const cronExpression = process.env.CRON_EXPRESSION || '*/2 * * * *';
 const timezone = process.env.TZ || 'America/New_York';
+
+const PORT = process.env.PORT || 10000;
+const express = require('express');
+const app = express();
+
+app.get('/', (req, res) => { res.send('AutoSocial Studio is running! 🚀'); });
+app.listen(PORT, () => { console.log(`🌐 Health check server running on port ${PORT}`); });
 
 console.log('='.repeat(50));
 console.log('🚀 AutoSocial Studio - Iniciando Deployment en Render');
