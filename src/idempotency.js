@@ -31,3 +31,9 @@ class SeenRegistry {
     this.notifier = options.notifier || defaultNotifier;
   }
 }
+
+// Exportar la clase y helpers
+module.exports = {
+  SeenRegistry,
+  dispatchUncertainNotification,
+};
