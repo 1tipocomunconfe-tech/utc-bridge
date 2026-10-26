@@ -1,22 +1,24 @@
 const path = require('path');
 
-// __dirname en Render: /opt/render/project/src/
-// Al hacer '..' obtenemos: /opt/render/project/ (el root correcto)
-const defaultProjectRoot = process.env.PROJECT_ROOT || path.resolve(__dirname, '..');
+// Múltiples capas de fallback para projectRoot
+// 1. VARIABLE DE ENTORNO PROJECT_ROOT (si está configurada en Render)
+// 2. __dirname + '..' (directorio del archivo config.js subiendo un nivel)
+// 3. process.cwd() (último recurso)
+const defaultProjectRoot = process.env.PROJECT_ROOT || path.resolve(__dirname, '..') || process.cwd();
 
-// Config con TODOS los valores por defecto seguros
+// Config con TODOS los valores seguros - CADA UNA tiene un fallback
 const config = {
-  // Rutas - siempre tienen valores
+  // Rutas - siempre tienen valores seguros
   projectRoot: defaultProjectRoot,
-  queueDir: path.join(defaultProjectRoot, 'queue'),
-  schedulerStateDir: path.join(defaultProjectRoot, '.scheduler-state'),
+  queueDir: path.join(defaultProjectRoot, 'queue') || process.cwd(),
+  schedulerStateDir: path.join(defaultProjectRoot, '.scheduler-state') || process.cwd(),
   platformQueues: {
-    tiktok: path.join(defaultProjectRoot, 'queue'),
-    instagram: path.join(defaultProjectRoot, 'queue'),
-    youtube: path.join(defaultProjectRoot, 'queue'),
+    tiktok: path.join(defaultProjectRoot, 'queue') || process.cwd(),
+    instagram: path.join(defaultProjectRoot, 'queue') || process.cwd(),
+    youtube: path.join(defaultProjectRoot, 'queue') || process.cwd(),
   },
 
-  // Configuración de publicación - valores seguros
+  // Configuración de publicación
   publishWindowStart: '08:00',
   publishWindowEnd: '22:00',
   timezone: 'America/New_York',
@@ -34,11 +36,15 @@ const config = {
     youtube: { cap: 2, period: 'daily' },
   },
 
-  // Notificaciones - valores seguros (cadenas vacías en lugar de undefined)
+  // Notificaciones - strings vacíos en lugar de undefined
   notifyTelegramBotToken: '',
   notifyTelegramChatId: '',
   notifyDiscordWebhookUrl: '',
   notifyLevel: 'errors',
+
+  // Valores adicionales seguros
+  staleLockMs: 1800000,
 };
 
+// Exporta el objeto config directamente
 module.exports = config;
