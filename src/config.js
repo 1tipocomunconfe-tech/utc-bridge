@@ -1,13 +1,18 @@
 const path = require('path');
 
+// Use __dirname to reliably determine project root
+// __dirname is the directory where this config.js file lives: /Users/stuffswag.com/Documents/Proyectos/UPLOADTIPOCOMUNSHORT/src
+// Project root is one level up: /Users/stuffswag.com/Documents/Proyectos/UPLOADTIPOCOMUNSHORT
+const projectRoot = path.resolve(__dirname, '..');
+
 module.exports = {
-  projectRoot: process.cwd(),
-  queueDir: path.join(process.cwd(), 'queue'),
-  schedulerStateDir: path.join(process.cwd(), '.scheduler-state'),
+  projectRoot: projectRoot,
+  queueDir: path.join(projectRoot, 'queue'),
+  schedulerStateDir: path.join(projectRoot, '.scheduler-state'),
   platformQueues: {
-    tiktok: path.join(process.cwd(), 'queue'),
-    instagram: path.join(process.cwd(), 'queue'),
-    youtube: path.join(process.cwd(), 'queue'),
+    tiktok: path.join(projectRoot, 'queue'),
+    instagram: path.join(projectRoot, 'queue'),
+    youtube: path.join(projectRoot, 'queue'),
   },
   publishWindowStart: '08:00',
   publishWindowEnd: '22:00',
