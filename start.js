@@ -1,3 +1,3 @@
 #!/usr/bin/env node
-// Root start.js - redirects to src/start.js for Render deployment
+// Root start.js - redirige a src/start.js para Render
 require('./src/start.js');

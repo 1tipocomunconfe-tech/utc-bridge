@@ -1,19 +1,20 @@
 const path = require('path');
 
-// Use __dirname to reliably determine project root
-// __dirname is set by Node.js to the directory of this file
-// __dirname = /Users/stuffswag.com/Documents/Proyectos/UPLOADTIPOCOMUNSHORT/src
-// projectRoot = one level up = /Users/stuffswag.com/Documents/Proyectos/UPLOADTIPOCOMUNSHORT
-const projectRoot = path.resolve(__dirname, '..');
+// Aseguramos que projectRoot siempre tenga un valor
+// En Render: process.cwd() es /opt/render/project/src/
+// __dirname es /opt/render/project/src/
+// path.resolve(__dirname, '..') da /opt/render/project/ (el root correcto)
+const defaultProjectRoot = process.env.PROJECT_ROOT || path.resolve(__dirname, '..');
 
-module.exports = {
-  projectRoot: projectRoot,
-  queueDir: path.join(projectRoot, 'queue'),
-  schedulerStateDir: path.join(projectRoot, '.scheduler-state'),
+// Extiende o crea el objeto config con valores seguros
+const config = {
+  projectRoot: defaultProjectRoot,
+  queueDir: path.join(defaultProjectRoot, 'queue'),
+  schedulerStateDir: path.join(defaultProjectRoot, '.scheduler-state'),
   platformQueues: {
-    tiktok: path.join(projectRoot, 'queue'),
-    instagram: path.join(projectRoot, 'queue'),
-    youtube: path.join(projectRoot, 'queue'),
+    tiktok: path.join(defaultProjectRoot, 'queue'),
+    instagram: path.join(defaultProjectRoot, 'queue'),
+    youtube: path.join(defaultProjectRoot, 'queue'),
   },
   publishWindowStart: '08:00',
   publishWindowEnd: '22:00',
@@ -28,3 +29,6 @@ module.exports = {
     youtube: { cap: 2, period: 'daily' },
   },
 };
+
+// Exporta el objeto config directamente
+module.exports = config;
