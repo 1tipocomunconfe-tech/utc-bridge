@@ -1,8 +1,9 @@
 const path = require('path');
 
 // Use __dirname to reliably determine project root
-// __dirname is the directory where this config.js file lives: /Users/stuffswag.com/Documents/Proyectos/UPLOADTIPOCOMUNSHORT/src
-// Project root is one level up: /Users/stuffswag.com/Documents/Proyectos/UPLOADTIPOCOMUNSHORT
+// __dirname is set by Node.js to the directory of this file
+// __dirname = /Users/stuffswag.com/Documents/Proyectos/UPLOADTIPOCOMUNSHORT/src
+// projectRoot = one level up = /Users/stuffswag.com/Documents/Proyectos/UPLOADTIPOCOMUNSHORT
 const projectRoot = path.resolve(__dirname, '..');
 
 module.exports = {
