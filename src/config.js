@@ -10,7 +10,7 @@ function getBoolean(value, defaultValue = false) {
   return value.toString().toLowerCase() === "true";
 }
 
-const projectRoot = path.resolve(__dirname, "..");
+const projectRoot = process.cwd();
 
 function resolveOptionalProjectPath(value) {
   const trimmed = String(value || "").trim();
@@ -22,9 +22,9 @@ function resolveOptionalProjectPath(value) {
 
 const config = {
   projectRoot,
-  queueDir: path.resolve(projectRoot, process.env.QUEUE_DIR || "queue/default/tiktok/pending"),
-  postedDir: path.resolve(projectRoot, process.env.POSTED_DIR || "queue/default/tiktok/posted"),
-  failedDir: path.resolve(projectRoot, process.env.FAILED_DIR || "queue/default/tiktok/failed"),
+  queueDir: path.resolve(projectRoot, process.env.TIKTOK_QUEUE_DIR || "queue/default/tiktok/pending"),
+  postedDir: path.resolve(projectRoot, process.env.TIKTOK_POSTED_DIR || "queue/default/tiktok/posted"),
+  failedDir: path.resolve(projectRoot, process.env.TIKTOK_FAILED_DIR || "queue/default/tiktok/failed"),
   profileDir: path.resolve(projectRoot, process.env.BROWSER_PROFILE_DIR || ".profile"),
   instagramQueueDir: path.resolve(
     projectRoot,
