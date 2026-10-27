@@ -1,7 +1,7 @@
 const fs = require("fs/promises");
 const path = require("path");
 const cron = require("node-cron");
-const { config } = require("./config");
+const config = require("./config") || {};
 const { getNextQueuedItem } = require("./queue");
 const { LimitsStore } = require("./limits");
 const { postNextFromQueue } = require("./post-service");
@@ -22,17 +22,18 @@ function parseClock(value) {
 }
 
 function getLocalMinutes(date, timezone) {
+  const tz = timezone || config.timezone || 'America/New_York';
   const parts = new Intl.DateTimeFormat("en-GB", {
     hour: "2-digit",
     minute: "2-digit",
     hour12: false,
-    timeZone: timezone,
+    timeZone: tz,
   }).formatToParts(date);
   const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
   return Number(values.hour) * 60 + Number(values.minute);
 }
 
-function isWithinPublishWindow(date, start, end, timezone = config.timezone) {
+function isWithinPublishWindow(date, start, end, timezone = config.timezone || 'America/New_York') {
   const current = getLocalMinutes(date, timezone);
   const startMinutes = parseClock(start);
   const endMinutes = parseClock(end);
@@ -45,7 +46,7 @@ function isWithinPublishWindow(date, start, end, timezone = config.timezone) {
   return current >= startMinutes || current < endMinutes;
 }
 
-function getSchedulerStatePath(accountId, platform, stateDir = config.schedulerStateDir) {
+function getSchedulerStatePath(accountId, platform, stateDir = config.schedulerStateDir || process.cwd()) {
   return path.resolve(stateDir, accountId, `${platform}.json`);
 }
 
@@ -122,15 +123,15 @@ function createSchedulerPolicy(options = {}) {
   const platform = options.platform || "tiktok";
   const accountId = options.accountId || "default";
   const clock = options.clock || (() => new Date());
-  const queueDir = options.queueDir || config.platformQueues[platform];
+  const queueDir = options.queueDir || config.queueDir || process.cwd();
   const getItem = options.getNextQueuedItem || getNextQueuedItem;
   const random = options.random || Math.random;
   const wait = options.wait || ((milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)));
-  const postDelayMs = options.postDelayMs ?? config.postDelayMs;
-  const jitterMaxMs = options.jitterMaxMs ?? config.jitterMaxMs;
-  const windowStart = options.windowStart || config.publishWindowStart;
-  const windowEnd = options.windowEnd || config.publishWindowEnd;
-  const timezone = options.timezone || config.timezone;
+  const postDelayMs = options.postDelayMs ?? config.postDelayMs ?? 1000;
+  const jitterMaxMs = options.jitterMaxMs ?? config.jitterMaxMs ?? 30000;
+  const windowStart = options.windowStart || config.publishWindowStart || '08:00';
+  const windowEnd = options.windowEnd || config.publishWindowEnd || '22:00';
+  const timezone = options.timezone || config.timezone || 'America/New_York';
   const limits = options.limits || new LimitsStore({
     statePath: options.limitsStatePath,
     timezone,
@@ -239,18 +240,18 @@ async function runScheduledPost(options = {}) {
   const policy = options.policy || createSchedulerPolicy({
     platform: options.platform || "tiktok",
     accountId: options.accountId || "default",
-    queueDir: options.queueDir || config.queueDir,
+    queueDir: options.queueDir || config.queueDir || process.cwd(),
     getNextQueuedItem: options.getNextQueuedItem,
     clock: options.clock,
     limits: options.limits,
     statePath: options.statePath,
     stateDir: options.stateDir,
     limitsStatePath: options.limitsStatePath,
-    postDelayMs: options.postDelayMs,
-    jitterMaxMs: options.jitterMaxMs,
-    windowStart: options.windowStart,
-    windowEnd: options.windowEnd,
-    timezone: options.timezone,
+    postDelayMs: options.postDelayMs ?? config.postDelayMs ?? 1000,
+    jitterMaxMs: options.jitterMaxMs ?? config.jitterMaxMs ?? 30000,
+    windowStart: options.windowStart || config.publishWindowStart || '08:00',
+    windowEnd: options.windowEnd || config.publishWindowEnd || '22:00',
+    timezone: options.timezone || config.timezone || 'America/New_York',
     wait: options.wait,
     random: options.random,
   });
@@ -284,17 +285,18 @@ async function runScheduledPost(options = {}) {
 
 async function startDaemon(options = {}) {
   await (options.reconcile || reconcileStartupState)(options);
-  if (!cron.validate(config.cronExpression)) {
-    throw new Error(`Invalid CRON_EXPRESSION: ${config.cronExpression}`);
+  const cronExpr = config.cronExpression || '*/2 * * * *';
+  if (!cron.validate(cronExpr)) {
+    throw new Error(`Invalid CRON_EXPRESSION: ${cronExpr}`);
   }
 
-  console.log(`Starting scheduler: ${config.cronExpression} (${config.timezone})`);
+  console.log(`Starting scheduler: ${cronExpr} (${config.timezone || 'America/New_York'})`);
   console.log("Press Ctrl+C to stop.");
 
   let task;
   const schedule = options.schedule || cron.schedule;
   task = schedule(
-    config.cronExpression,
+    cronExpr,
     async () => {
       if (isKillSwitchEnabled()) {
         console.log(`[${now()}] ${getKillSwitchReason()}`);
@@ -304,7 +306,7 @@ async function startDaemon(options = {}) {
       await runScheduledPost();
     },
     {
-      timezone: config.timezone,
+      timezone: config.timezone || 'America/New_York',
     }
   );
   return task;
