@@ -12,7 +12,9 @@ const { ensureDirectories, fileExists, moveWithTimestamp } = require("./fs-utils
 const { SeenRegistry } = require("./idempotency");
 const { notifier: defaultNotifier } = require("./notifier");
 
-const seenRegistry = new SeenRegistry();
+const seenRegistry = new SeenRegistry({
+  statePath: config?.schedulerStateDir ? path.resolve(config.schedulerStateDir, "seen.json") : path.resolve(process.cwd(), "seen.json")
+});
 
 async function reconcileSeenState(notifier) {
   return seenRegistry.reconcileInProgress({ notifier });

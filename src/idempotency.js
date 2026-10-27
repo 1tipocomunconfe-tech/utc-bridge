@@ -2,7 +2,10 @@ const crypto = require("crypto");
 const fs = require("fs/promises");
 const os = require("os");
 const path = require("path");
-const { config } = require("./config");
+
+// Importación segura con fallback inmediato
+const config = require("./config") || {};
+
 const {
   acquireExclusiveLock,
   moveLockToReview,
@@ -23,16 +26,21 @@ function dispatchUncertainNotification(notifier, payload) {
 
 class SeenRegistry {
   constructor(options = {}) {
-    // Fallback seguro: si config.schedulerStateDir no existe, usar process.cwd()
-    const stateDir = config.schedulerStateDir || process.cwd();
+    // SOLUCIÓN ULTRA-SEGURA: Verificación exhaustiva de config y config.schedulerStateDir
+    const safeConfig = config || {};
+    const stateDir = (safeConfig && safeConfig.schedulerStateDir)
+      ? safeConfig.schedulerStateDir
+      : process.cwd();
+
     this.statePath = options.statePath || path.resolve(stateDir, "seen.json");
     this.lockPath = `${this.statePath}.lock`;
-    this.staleLockMs = options.staleLockMs ?? config.staleLockMs ?? 1800000;
+
+    // Fallback para staleLockMs
+    this.staleLockMs = options.staleLockMs ?? (safeConfig && safeConfig.staleLockMs) ?? 1800000;
     this.notifier = options.notifier || defaultNotifier;
   }
 }
 
-// Exportar la clase y helpers
 module.exports = {
   SeenRegistry,
   dispatchUncertainNotification,
