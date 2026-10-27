@@ -1,8 +1,11 @@
 const fs = require("fs");
 const path = require("path");
-const { config } = require("./config");
+// Importación segura con fallback inmediato
+const config = require("./config") || {};
 
-let killSwitchSourcePath = path.resolve(config.projectRoot, ".env");
+// Solución ultra-segura contra undefined
+const projectRootPath = (config && config.projectRoot) ? config.projectRoot : process.cwd();
+let killSwitchSourcePath = path.resolve(projectRootPath, ".env");
 let cachedSourceKey = null;
 let cachedSourceValue;
 
@@ -20,10 +23,11 @@ function readDynamicKillSwitch() {
       cachedSourceKey = sourceKey;
       cachedSourceValue = parseKillSwitchValue(fs.readFileSync(killSwitchSourcePath, "utf8"));
     }
-    return cachedSourceValue === undefined ? config.killSwitch : cachedSourceValue;
+    // Fallback seguro para config.killSwitch
+    return cachedSourceValue === undefined ? (config && config.killSwitch) : cachedSourceValue;
   } catch (error) {
     if (error.code !== "ENOENT") throw error;
-    return process.env.KILL_SWITCH === undefined ? config.killSwitch : process.env.KILL_SWITCH;
+    return process.env.KILL_SWITCH === undefined ? (config && config.killSwitch) : process.env.KILL_SWITCH;
   }
 }
 
